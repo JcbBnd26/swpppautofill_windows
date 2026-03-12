@@ -1,0 +1,351 @@
+description: ODOT Clean Water Inspection Form - AutoFill Mapping
+fields:
+  job_piece:
+    label: Job Piece
+    pdf_field_name: Job Piece
+    required: false
+  project_number:
+    label: Project Number
+    pdf_field_name: Project Number
+    required: false
+  contract_id:
+    label: Contract ID
+    pdf_field_name: Contract ID
+    required: false
+  location_description_1:
+    label: Location Description
+    pdf_field_name: Location Description
+    required: false
+  location_description_2:
+    label: Location Description_2
+    pdf_field_name: Location Description_2
+    required: false
+  re_odot_contact_1:
+    label: RE andor ODOT Contact
+    pdf_field_name: RE andor ODOT Contact
+    required: false
+  re_odot_contact_2:
+    label: RE andor ODOT Contact_2
+    pdf_field_name: RE andor ODOT Contact_2
+    required: false
+  inspection_type:
+    label: Type of Inspection
+    pdf_field_name: Type of Inspection
+    required: false
+date_fields:
+- label: Date
+  pdf_field_name: Date
+checkbox_fields: []
+checkboxes:
+  Erosion_Minimization:
+    pdf_fields:
+    - text: BMPs are in place to minimize erosion?
+      allow_na: false
+      yes_field: undefined
+      no_field: undefined_2
+      yes_value: /On
+      no_value: /On
+      na_value: /On
+    - text: Areas of work are delineated and steep slope disturbance is minimized?
+      allow_na: true
+      yes_field: undefined_3
+      no_field: undefined_3
+      na_field: undefined_3
+      yes_value: /YES
+      no_value: /NO
+      na_value: /NA
+    - text: Soils are stabilized where work has stopped for 14 days?
+      allow_na: false
+      yes_field: undefined_4
+      no_field: undefined_5
+      yes_value: /On
+      no_value: /On
+      na_value: /On
+    - text: Conveyance channels are in place to route water around unstabilized areas?
+      allow_na: true
+      yes_field: undefined_6
+      no_field: undefined_6
+      na_field: undefined_6
+      yes_value: /YES_2
+      no_value: /NO_2
+      na_value: /NA_2
+    - text: Pipe Outlets have energy dissipation if connected to surface water?
+      allow_na: true
+      yes_field: undefined_7
+      no_field: undefined_7
+      na_field: undefined_7
+      yes_value: /YES_3
+      no_value: /NO_3
+      na_value: /NA_3
+    - text: BMPs discharge to vegetated areas?
+      allow_na: false
+      yes_field: undefined_8
+      no_field: undefined_9
+      yes_value: /On
+      no_value: /On
+      na_value: /On
+    labels: []
+  Sediment_Discharge_Minimization:
+    pdf_fields:
+    - text: Effective sediment control practices used?
+      allow_na: false
+      yes_field: undefined_10
+      no_field: undefined_11
+      yes_value: /On
+      no_value: /On
+      na_value: /On
+    - text: Dust prevention practices used?
+      allow_na: false
+      yes_field: undefined_12
+      no_field: undefined_13
+      yes_value: /On
+      no_value: /On
+      na_value: /On
+    - text: Erosion and sediment controls in place prior to soil disturbing activities?
+      allow_na: true
+      yes_field: undefined_14
+      no_field: undefined_14
+      na_field: undefined_14
+      yes_value: /YES_4
+      no_value: /NO_4
+      na_value: /NA_4
+    - text: Perimeter control BMPs used on downgradient perimeters and upgradient
+        of bufferzones?
+      allow_na: false
+      yes_field: undefined_15
+      no_field: undefined_16
+      yes_value: /On
+      no_value: /On
+      na_value: /On
+    - text: "Sediment control devices reinstalled if they\u2019ve been adjusted for\
+        \ short-term work?"
+      allow_na: true
+      yes_field: undefined_17
+      no_field: undefined_18
+      na_field: undefined_19
+      yes_value: /On
+      no_value: /On
+      na_value: /On
+    - text: All storm drain inlets are protected?
+      allow_na: true
+      yes_field: undefined_20
+      no_field: undefined_20
+      na_field: undefined_20
+      yes_value: /YES_5
+      no_value: /NO_5
+      na_value: /NA_5
+    - text: Soil stockpiles have sediment controls and are not in conveyances or natural
+        bufferzones?
+      allow_na: true
+      yes_field: undefined_21
+      no_field: undefined_22
+      na_field: undefined_23
+      yes_value: /On
+      no_value: /On
+      na_value: /On
+    - text: Effective vehicle tracking BMPs used?
+      allow_na: true
+      yes_field: undefined_24
+      no_field: undefined_24
+      na_field: undefined_24
+      yes_value: /YES_6
+      no_value: /NO_6
+      na_value: /NA_6
+    - text: 50 ft (100 ft in sensitive water) buffer preserved or redundant controls
+        in place if site is within 50 ft of or drains to surface water?
+      allow_na: true
+      yes_field: undefined_25
+      no_field: undefined_26
+      na_field: undefined_27
+      yes_value: /On
+      no_value: /On
+      na_value: /On
+    labels: []
+  BMP_Maintenance:
+    pdf_fields:
+    - text: Are all perimeter control BMPs maintained, functioning, and properly installed?
+      allow_na: false
+      yes_field: undefined_28
+      no_field: undefined_29
+      yes_value: /On
+      no_value: /On
+      na_value: /On
+    - text: Sediment in sediment control BMPs is at less than 1/2 the device height?
+      allow_na: false
+      yes_field: undefined_30
+      no_field: undefined_31
+      yes_value: /On
+      no_value: /On
+      na_value: /On
+    - text: Surface waters and discharge points are free of erosion and sediment?
+      allow_na: false
+      yes_field: undefined_32
+      no_field: undefined_33
+      yes_value: /On
+      no_value: /On
+      na_value: /On
+    - text: Paved surfaces on or adjacent to site are free of tracked sediment?
+      allow_na: true
+      yes_field: undefined_34
+      no_field: undefined_34
+      na_field: undefined_34
+      yes_value: /YES_7
+      no_value: /NO_7
+      na_value: /NA_7
+    labels: []
+  Solid_And_Hazardous_Waste:
+    pdf_fields:
+    - text: Building products and chemicals (pesticides, herbicides, fertilizer, etc.)
+        are covered?
+      allow_na: true
+      yes_field: undefined_35
+      no_field: undefined_36
+      na_field: undefined_37
+      yes_value: /On
+      no_value: /On
+      na_value: /On
+    - text: Solid and hazardous waste is stored and disposed of properly?
+      allow_na: true
+      yes_field: undefined_38
+      no_field: undefined_38
+      na_field: undefined_38
+      yes_value: /YES_8
+      no_value: /NO_8
+      na_value: /NA_8
+    - text: Portable toilets are positioned properly?
+      allow_na: true
+      yes_field: undefined_39
+      no_field: undefined_39
+      na_field: undefined_39
+      yes_value: /YES_9
+      no_value: /NO_9
+      na_value: /NA_9
+    - text: Vehicle fueling in a contained area?
+      allow_na: true
+      yes_field: undefined_40
+      no_field: undefined_40
+      na_field: undefined_40
+      yes_value: /YES_10
+      no_value: /NO_10
+      na_value: /NA_10
+    - text: All material handling and storage areas reasonably clean and free of spills,
+        leaks, and other harmful materials?
+      allow_na: false
+      yes_field: undefined_41
+      no_field: undefined_42
+      yes_value: /On
+      no_value: /On
+      na_value: /On
+    - text: Dumpsters have a lid or cover for use during rain events or inactivity?
+      allow_na: true
+      yes_field: undefined_43
+      no_field: undefined_43
+      na_field: undefined_43
+      yes_value: /YES_11
+      no_value: /NO_11
+      na_value: /NA_11
+    - text: Site is free of floatables and litter?
+      allow_na: false
+      yes_field: undefined_44
+      no_field: undefined_45
+      yes_value: /On
+      no_value: /On
+      na_value: /On
+    - text: Concrete and other washout wastes are contained and washouts are properly
+        identified?
+      allow_na: false
+      yes_field: undefined_46
+      no_field: undefined_47
+      yes_value: /On
+      no_value: /On
+      na_value: /On
+    - text: Vehicle and equipment washing wastes not in contact with ground and no
+        engine degreasing occurs on site?
+      allow_na: false
+      yes_field: undefined_48
+      no_field: undefined_49
+      yes_value: /On
+      no_value: /On
+      na_value: /On
+    labels: []
+  Documentation_And_SWPPP:
+    pdf_fields:
+    - text: Notice is posted with permit number, contact information, project description
+        and SWPPP location?
+      allow_na: false
+      yes_field: undefined_50
+      no_field: undefined_51
+      yes_value: /On
+      no_value: /On
+      na_value: /On
+    - text: Was the SWPPP inspected on this visit?
+      allow_na: false
+      yes_field: undefined_52
+      no_field: undefined_52
+      yes_value: /YES_12
+      no_value: /NO_12
+      na_value: /On
+    - text: Is the SWPPP up to date and implemented?
+      allow_na: false
+      yes_field: undefined_53
+      no_field: undefined_53
+      yes_value: /YES_13
+      no_value: /NO_13
+      na_value: /On
+    - text: Employee training
+      allow_na: false
+      yes_field: undefined_54
+      no_field: undefined_54
+      yes_value: /YES_14
+      no_value: /NO_14
+      na_value: /On
+    - text: Inspection documentation every 7 days or within 24 hours of half in rain
+      allow_na: false
+      yes_field: undefined_55
+      no_field: undefined_55
+      yes_value: /YES_15
+      no_value: /NO_15
+      na_value: /On
+    - text: Changes to site are noted and Erosion Control plan sheets included
+      allow_na: false
+      yes_field: undefined_56
+      no_field: undefined_56
+      yes_value: /YES_16
+      no_value: /NO_16
+      na_value: /On
+    - text: Site conditions are documented accurately
+      allow_na: false
+      yes_field: undefined_57
+      no_field: undefined_57
+      yes_value: /YES_17
+      no_value: /NO_17
+      na_value: /On
+    labels: []
+  Stabilization:
+    pdf_fields:
+    - text: Is this site ready for final stabilization?
+      allow_na: false
+      yes_field: undefined_58
+      no_field: undefined_58
+      yes_value: /YES_18
+      no_value: /NO_18
+      na_value: /On
+    labels: []
+  Additional_Information:
+    pdf_fields:
+    - text: Temporary sediment basin used if 10 or more acres disturbed?
+      allow_na: true
+      yes_field: undefined_59
+      no_field: undefined_59
+      na_field: undefined_59
+      yes_value: /YES_19
+      no_value: /NO_19
+      na_value: /NA_12
+    - text: Dewatering activities present on site?
+      allow_na: false
+      yes_field: undefined_60
+      no_field: undefined_60
+      yes_value: /YES_20
+      no_value: /NO_20
+      na_value: /On
+    labels: []

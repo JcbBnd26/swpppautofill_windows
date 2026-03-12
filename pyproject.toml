@@ -1,0 +1,25 @@
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "swppp-autofill"
+version = "0.2.0"
+description = "Weekly PDF form generator with simple GUI"
+authors = [{name = "You"}]
+requires-python = ">=3.10"
+dependencies = ["pypdf>=5.0.0", "typer>=0.12.0", "python-dateutil>=2.9.0", "pydantic>=2.8.0", "pyyaml>=6.0.1"]
+
+[project.scripts]
+swppp = "app.ui_cli.main:app"
+swppp-inspect = "app.tools.inspect:main"
+
+[project.gui-scripts]
+swppp-gui = "app.ui_gui.main:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
