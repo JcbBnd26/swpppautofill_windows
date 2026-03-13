@@ -1,0 +1,6 @@
+[console_scripts]
+swppp = app.ui_cli.main:app
+swppp-inspect = app.tools.inspect:main
+
+[gui_scripts]
+swppp-gui = app.ui_gui.main:main

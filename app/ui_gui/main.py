@@ -16,13 +16,17 @@
 
 from __future__ import annotations
 
+import calendar as cal_mod
 import sys
 import threading
 import tkinter as tk
+from datetime import date as date_cls
+from datetime import timedelta
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from dateutil.parser import parse as dtparse
+from tkcalendar import Calendar
 
 from app.core.config_manager import build_project_info, build_run_options, load_mapping
 from app.core.dates import weekly_dates
@@ -54,6 +58,124 @@ def _bundle_path(relative: str) -> Path:
 DEFAULT_DATE_FORMAT = "%m/%d/%Y"
 DEFAULT_TEMPLATE = _bundle_path("assets/template.pdf")
 DEFAULT_MAPPING = _bundle_path("app/core/config_example.yaml")
+
+
+# ============================================================
+#  DatePickerEntry – auto-formatting date field + calendar popup
+# ============================================================
+
+
+class DatePickerEntry(ttk.Frame):
+    """Composite widget: an auto-formatting MM/DD/YYYY entry with a
+    calendar popup button."""
+
+    def __init__(self, parent, textvariable: tk.StringVar, **kwargs):
+        super().__init__(parent, **kwargs)
+        self._var = textvariable
+        self._suppress_trace = False
+        self._popup: tk.Toplevel | None = None
+        self._dismiss_binding: str | None = None
+
+        self._entry = ttk.Entry(self, textvariable=self._var, width=14)
+        self._entry.grid(row=0, column=0, sticky="w")
+
+        self._btn = ttk.Button(
+            self, text="\U0001f4c5", width=3, command=self._open_calendar
+        )
+        self._btn.grid(row=0, column=1, padx=(2, 0))
+
+        self._var.trace_add("write", self._on_text_change)
+
+    # --- Auto-format: insert slashes as user types digits ---
+    def _on_text_change(self, *_args):
+        if self._suppress_trace:
+            return
+        self._suppress_trace = True
+        try:
+            raw = self._var.get()
+            digits = "".join(c for c in raw if c.isdigit())
+            # Build formatted string from digits only
+            parts = []
+            if len(digits) >= 2:
+                parts.append(digits[:2])
+                if len(digits) >= 4:
+                    parts.append(digits[2:4])
+                    if len(digits) >= 5:
+                        parts.append(digits[4:8])
+                else:
+                    parts.append(digits[2:])
+            else:
+                parts.append(digits)
+            formatted = "/".join(parts)
+            if formatted != raw:
+                self._var.set(formatted)
+                self._entry.icursor(len(formatted))
+        finally:
+            self._suppress_trace = False
+
+    # --- Calendar popup ---
+    def _open_calendar(self):
+        if self._popup is not None:
+            self._close_popup()
+            return
+
+        # Determine initial date for the calendar
+        today = date_cls.today()
+        try:
+            dt = dtparse(self._var.get(), dayfirst=False, yearfirst=False)
+            init_year, init_month, init_day = dt.year, dt.month, dt.day
+        except Exception:
+            init_year, init_month, init_day = today.year, today.month, today.day
+
+        popup = tk.Toplevel(self)
+        popup.overrideredirect(True)
+        popup.wm_attributes("-topmost", True)
+
+        # Position below the entry
+        x = self._entry.winfo_rootx()
+        y = self._entry.winfo_rooty() + self._entry.winfo_height() + 2
+        popup.geometry(f"+{x}+{y}")
+
+        cal = Calendar(
+            popup,
+            selectmode="day",
+            year=init_year,
+            month=init_month,
+            day=init_day,
+            date_pattern="mm/dd/yyyy",
+        )
+        cal.pack(padx=4, pady=4)
+
+        def _on_select(_event=None):
+            self._suppress_trace = True
+            try:
+                self._var.set(cal.get_date())
+            finally:
+                self._suppress_trace = False
+            self._close_popup()
+
+        cal.bind("<<CalendarSelected>>", _on_select)
+        popup.bind("<Escape>", lambda _e: self._close_popup())
+
+        # Dismiss on any click in the main window
+        root = self.winfo_toplevel()
+        self._dismiss_binding = root.bind(
+            "<Button-1>", lambda _e: self._close_popup(), add="+"
+        )
+
+        self._popup = popup
+
+    def _close_popup(self):
+        if self._popup is not None:
+            try:
+                root = self.winfo_toplevel()
+                if self._dismiss_binding:
+                    root.unbind("<Button-1>", self._dismiss_binding)
+                    self._dismiss_binding = None
+            except Exception:
+                pass
+            self._popup.destroy()
+            self._popup = None
 
 
 # ============================================================
@@ -132,15 +254,28 @@ class App(tk.Tk):
         # Mapping loaded from YAML
         self._current_mapping: TemplateMap | None = None
 
+        # --- CUSTOM DATE OVERRIDE ---
+        self._custom_dates_enabled = tk.BooleanVar(value=False)
+        self._rain_enabled = tk.BooleanVar(value=True)
+
+        # --- QUICK MONTH STATE ---
+        self._quick_year = tk.StringVar(value=str(date_cls.today().year))
+        self._month_vars: list[tk.BooleanVar] = []
+        self._month_checkbuttons: list[ttk.Checkbutton] = []
+        for i in range(12):
+            var = tk.BooleanVar(value=(i == date_cls.today().month - 1))
+            self._month_vars.append(var)
+
         # --- RAIN DAYS STATE ---
-        self.rain_start_date = tk.StringVar()
-        self.rain_end_date = tk.StringVar()
         self.rain_station = tk.StringVar()
         self.rain_status = tk.StringVar(value="")
         self._rain_days: list[RainDay] = []
+        self._rain_data_ready = False
 
         # Build UI and load YAML
         self._build_ui()
+        self._bind_generator_input_traces()
+        self._update_generate_button_state()
         self._configure_grid()
         self._load_fields_from_yaml()
 
@@ -196,27 +331,6 @@ class App(tk.Tk):
         )
         lr += 1
 
-        ttk.Label(left, text="Start Date (MM/DD/YYYY):").grid(
-            row=lr, column=0, sticky="e", **pad
-        )
-        ttk.Entry(left, textvariable=self.start_date, width=18).grid(
-            row=lr, column=1, sticky="w", **pad
-        )
-        lr += 1
-
-        ttk.Label(left, text="End Date (MM/DD/YYYY):").grid(
-            row=lr, column=0, sticky="e", **pad
-        )
-        ttk.Entry(left, textvariable=self.end_date, width=18).grid(
-            row=lr, column=1, sticky="w", **pad
-        )
-        lr += 1
-
-        ttk.Separator(left).grid(
-            row=lr, column=0, columnspan=2, sticky="ew", pady=(4, 8)
-        )
-        lr += 1
-
         # -- Project Fields --
         ttk.Label(left, text="Project Fields", font=("Segoe UI", 10, "bold")).grid(
             row=lr, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 4)
@@ -230,87 +344,161 @@ class App(tk.Tk):
         self.fields_inner.columnconfigure(1, weight=1)
         lr += 1
 
-        ttk.Separator(left).grid(
-            row=lr, column=0, columnspan=2, sticky="ew", pady=(8, 8)
+        # ── Generator Settings LabelFrame ──
+        settings_frame = ttk.LabelFrame(left, text="Generator Settings", padding=10)
+        settings_frame.grid(
+            row=lr, column=0, columnspan=2, sticky="ew", padx=10, pady=(4, 8)
         )
+        settings_frame.columnconfigure(1, weight=1)
         lr += 1
+        sr = 0  # row counter inside settings_frame
 
-        # -- Rain Days --
-        rain_frame = ttk.LabelFrame(left, text="Rain Days", padding=10)
-        rain_frame.grid(
-            row=lr, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 8)
+        # Year selector
+        ttk.Label(settings_frame, text="Year:").grid(
+            row=sr, column=0, sticky="e", padx=6, pady=3
         )
-        rain_frame.columnconfigure(1, weight=1)
-        lr += 1
+        current_year = date_cls.today().year
+        years = [str(y) for y in range(current_year - 5, current_year + 1)]
+        self._year_combo = ttk.Combobox(
+            settings_frame,
+            textvariable=self._quick_year,
+            values=years,
+            state="readonly",
+            width=6,
+        )
+        self._year_combo.grid(row=sr, column=1, sticky="w", padx=6, pady=3)
+        sr += 1
 
-        ttk.Label(rain_frame, text="Start Date (MM/DD/YYYY):").grid(
-            row=0, column=0, sticky="e", padx=6, pady=3
+        # Month checkboxes
+        ttk.Label(settings_frame, text="Month(s):").grid(
+            row=sr, column=0, sticky="ne", padx=6, pady=3
         )
-        ttk.Entry(rain_frame, textvariable=self.rain_start_date, width=18).grid(
-            row=0, column=1, sticky="w", padx=6, pady=3
-        )
+        qm_frame = ttk.Frame(settings_frame)
+        qm_frame.grid(row=sr, column=1, sticky="w", padx=6, pady=3)
 
-        ttk.Label(rain_frame, text="End Date (MM/DD/YYYY):").grid(
-            row=1, column=0, sticky="e", padx=6, pady=3
-        )
-        ttk.Entry(rain_frame, textvariable=self.rain_end_date, width=18).grid(
-            row=1, column=1, sticky="w", padx=6, pady=3
-        )
+        months = [cal_mod.month_abbr[m] for m in range(1, 13)]
+        for i, m in enumerate(months):
+            r, c = divmod(i, 6)
+            checkbutton = ttk.Checkbutton(
+                qm_frame, text=m, variable=self._month_vars[i]
+            )
+            checkbutton.grid(row=r, column=c, sticky="w", padx=2)
+            self._month_checkbuttons.append(checkbutton)
+        sr += 1
 
-        ttk.Label(rain_frame, text="Station:").grid(
-            row=2, column=0, sticky="e", padx=6, pady=3
+        # Generate + custom date toggle
+        ctrl_frame = ttk.Frame(settings_frame)
+        ctrl_frame.grid(
+            row=sr, column=0, columnspan=2, sticky="ew", padx=6, pady=(2, 4)
         )
+        ctrl_frame.columnconfigure(0, weight=1)
+        ttk.Checkbutton(
+            ctrl_frame,
+            text="Custom date range",
+            variable=self._custom_dates_enabled,
+            command=self._toggle_custom_dates,
+        ).grid(row=0, column=0, sticky="e")
+        sr += 1
+
+        # Custom date fields (hidden by default)
+        self._custom_dates_frame = ttk.Frame(settings_frame)
+        self._custom_dates_frame.grid(
+            row=sr, column=0, columnspan=2, sticky="w", padx=6
+        )
+        ttk.Label(self._custom_dates_frame, text="Start:").grid(
+            row=0, column=0, sticky="e", padx=(0, 4)
+        )
+        self._start_picker = DatePickerEntry(
+            self._custom_dates_frame, textvariable=self.start_date
+        )
+        self._start_picker.grid(row=0, column=1, sticky="w")
+        ttk.Label(self._custom_dates_frame, text="End:").grid(
+            row=0, column=2, sticky="e", padx=(12, 4)
+        )
+        self._end_picker = DatePickerEntry(
+            self._custom_dates_frame, textvariable=self.end_date
+        )
+        self._end_picker.grid(row=0, column=3, sticky="w")
+        self._custom_dates_frame.grid_remove()
+        sr += 1
+
+        ttk.Checkbutton(
+            settings_frame,
+            text="Rain Days",
+            variable=self._rain_enabled,
+            command=self._toggle_rain_section,
+        ).grid(row=sr, column=0, columnspan=2, sticky="w", padx=6, pady=(6, 2))
+        sr += 1
+
+        self._rain_section_frame = ttk.LabelFrame(
+            settings_frame, text="Rain Days", padding=10
+        )
+        self._rain_section_frame.grid(
+            row=sr, column=0, columnspan=2, sticky="ew", padx=6, pady=(0, 0)
+        )
+        self._rain_section_frame.columnconfigure(0, weight=1)
+        rr = 0
+
+        # Rain buttons
+        rain_btn_frame = ttk.Frame(self._rain_section_frame)
+        rain_btn_frame.grid(row=rr, column=0, sticky="w")
+        ttk.Button(
+            rain_btn_frame, text="Fetch Rain Data", command=self._on_fetch_rain
+        ).grid(row=0, column=0, padx=(0, 6))
+        ttk.Label(rain_btn_frame, text="or").grid(row=0, column=1, padx=(0, 6))
+        ttk.Button(
+            rain_btn_frame, text="Load CSV", command=self._on_browse_rain_csv
+        ).grid(row=0, column=2)
+        rr += 1
+
+        # Station selector
+        ttk.Label(self._rain_section_frame, text="Station:").grid(
+            row=rr, column=0, sticky="w", pady=(3, 0)
+        )
+        rr += 1
         self.rain_station_combo = ttk.Combobox(
-            rain_frame,
+            self._rain_section_frame,
             textvariable=self.rain_station,
             values=station_display_list(),
             state="readonly",
             width=36,
         )
-        self.rain_station_combo.grid(row=2, column=1, sticky="w", padx=6, pady=3)
+        self.rain_station_combo.grid(row=rr, column=0, sticky="w", pady=(0, 3))
+        rr += 1
 
-        rain_btn_frame = ttk.Frame(rain_frame)
-        rain_btn_frame.grid(row=3, column=0, columnspan=2, pady=(6, 0))
-
-        ttk.Button(
-            rain_btn_frame, text="Fetch Rain Data", command=self._on_fetch_rain
-        ).grid(row=0, column=0, padx=6)
-        ttk.Button(
-            rain_btn_frame, text="Browse CSV", command=self._on_browse_rain_csv
-        ).grid(row=0, column=1, padx=6)
-        self._rain_generate_btn = ttk.Button(
-            rain_btn_frame,
-            text="Generate Rain PDFs",
-            command=self._on_generate_rain,
-            state="disabled",
-        )
-        self._rain_generate_btn.grid(row=0, column=2, padx=6)
-
+        # Progress bar (hidden until fetch)
         self._rain_progress = ttk.Progressbar(
-            rain_frame, orient="horizontal", mode="determinate", length=300
+            self._rain_section_frame,
+            orient="horizontal",
+            mode="determinate",
+            length=300,
         )
-        self._rain_progress.grid(
-            row=4, column=0, columnspan=2, sticky="ew", padx=6, pady=(6, 0)
-        )
-        self._rain_progress.grid_remove()  # hidden until fetch starts
+        self._rain_progress.grid(row=rr, column=0, sticky="ew", pady=(6, 0))
+        self._rain_progress.grid_remove()
+        rr += 1
 
+        # Status label
         ttk.Label(
-            rain_frame,
+            self._rain_section_frame,
             textvariable=self.rain_status,
             foreground="#336699",
             wraplength=400,
             anchor="w",
-        ).grid(row=5, column=0, columnspan=2, sticky="w", padx=6, pady=(4, 0))
+        ).grid(row=rr, column=0, sticky="w", pady=(4, 0))
+        sr += 1
 
-        # -- Generate / Quit Buttons --
-        btns = ttk.Frame(left)
-        btns.grid(row=lr, column=0, columnspan=2, pady=8)
-        ttk.Button(btns, text="Generate", command=self._on_generate).grid(
-            row=0, column=0, padx=6
+        self._generate_btn = ttk.Button(
+            settings_frame,
+            text="Generate",
+            command=self._on_generate_months,
+            width=18,
         )
-        ttk.Button(btns, text="Quit", command=self.destroy).grid(
-            row=0, column=1, padx=6
+        self._generate_btn.grid(row=sr, column=0, columnspan=2, pady=(8, 0))
+
+        ttk.Separator(left).grid(
+            row=lr, column=0, columnspan=2, sticky="ew", pady=(8, 8)
         )
+        lr += 1
 
         # ====================================================
         #  RIGHT COLUMN — Checklist (scrollable)
@@ -358,29 +546,204 @@ class App(tk.Tk):
             self.output_dir.set(str(Path(base)))
 
     # --------------------------------------------------------
+    #  Custom date toggle helpers
+    # --------------------------------------------------------
+    def _toggle_custom_dates(self):
+        if self._custom_dates_enabled.get():
+            self._custom_dates_frame.grid()
+            self._set_month_selection_state("disabled")
+        else:
+            self._custom_dates_frame.grid_remove()
+            self._set_month_selection_state("normal")
+            self.start_date.set("")
+            self.end_date.set("")
+        self._invalidate_rain_data()
+
+    def _toggle_rain_section(self):
+        if self._rain_enabled.get():
+            self._rain_section_frame.grid()
+        else:
+            self._rain_section_frame.grid_remove()
+        self._update_generate_button_state()
+
+    def _bind_generator_input_traces(self):
+        self._quick_year.trace_add("write", self._on_generator_inputs_changed)
+        self.start_date.trace_add("write", self._on_generator_inputs_changed)
+        self.end_date.trace_add("write", self._on_generator_inputs_changed)
+        for var in self._month_vars:
+            var.trace_add("write", self._on_generator_inputs_changed)
+
+    def _on_generator_inputs_changed(self, *_args):
+        self._invalidate_rain_data()
+
+    def _set_month_selection_state(self, state: str):
+        if hasattr(self, "_year_combo"):
+            self._year_combo.configure(
+                state="disabled" if state == "disabled" else "readonly"
+            )
+        for checkbutton in self._month_checkbuttons:
+            checkbutton.configure(state=state)
+
+    def _invalidate_rain_data(self):
+        self._rain_data_ready = False
+        self._rain_days = []
+        if self._rain_enabled.get() and self.rain_status.get():
+            self.rain_status.set("Rain data needs to be fetched or loaded.")
+        self._update_generate_button_state()
+
+    def _update_generate_button_state(self):
+        if not hasattr(self, "_generate_btn"):
+            return
+        state = "normal"
+        if self._rain_enabled.get() and not self._rain_data_ready:
+            state = "disabled"
+        self._generate_btn.config(state=state)
+
+    def _get_selected_months(self) -> list[int]:
+        checked = [i + 1 for i, v in enumerate(self._month_vars) if v.get()]
+        if not checked:
+            raise ValueError("Check at least one month.")
+        return checked
+
+    def _resolve_selected_date_range(self) -> tuple[date_cls, date_cls]:
+        today = date_cls.today()
+        if self._custom_dates_enabled.get():
+            start = date_cls.fromisoformat(
+                self._parse_user_date_mdy(self.start_date.get())
+            )
+            end = date_cls.fromisoformat(self._parse_user_date_mdy(self.end_date.get()))
+        else:
+            checked = self._get_selected_months()
+            year = int(self._quick_year.get())
+            first_month = checked[0]
+            last_month = checked[-1]
+            start = date_cls(year, first_month, 1)
+            end = date_cls(year, last_month, cal_mod.monthrange(year, last_month)[1])
+
+        if start <= today <= end:
+            end = today
+        if start > end:
+            raise ValueError("The selected date range ends before it begins.")
+        return start, end
+
+    def _resolve_rain_fetch_date_range(self) -> tuple[date_cls, date_cls]:
+        start, end = self._resolve_selected_date_range()
+        last_completed_day = date_cls.today() - timedelta(days=1)
+        if end > last_completed_day:
+            end = last_completed_day
+        if start > end:
+            raise ValueError(
+                "No completed rain data is available for the selected range yet."
+            )
+        return start, end
+
+    # --------------------------------------------------------
+    #  Generate (month checkboxes)
+    # --------------------------------------------------------
+    def _on_generate_months(self):
+        """Generate weekly + rain PDFs for the checked months."""
+        try:
+            checked = self._get_selected_months()
+            year = int(self._quick_year.get())
+            start_date, end_date = self._resolve_selected_date_range()
+
+            template = DEFAULT_TEMPLATE
+            raw_output_dir = self.output_dir.get().strip()
+            if not raw_output_dir:
+                raise ValueError("Choose an output folder before generating files.")
+            outdir = Path(raw_output_dir)
+            outdir.mkdir(parents=True, exist_ok=True)
+
+            if not template.exists():
+                messagebox.showerror(
+                    "Template Missing", f"Template PDF not found:\n{template}"
+                )
+                return
+
+            mapping = self._current_mapping
+            if mapping is None:
+                mapping = load_mapping(DEFAULT_MAPPING)
+                self._current_mapping = mapping
+
+            proj_dict = {k: v.get().strip() for k, v in self.project_entries.items()}
+            project = build_project_info(proj_dict)
+            check_states = self._collect_checkbox_states()
+
+            iso_start = start_date.isoformat()
+            iso_end = end_date.isoformat()
+
+            options = build_run_options(
+                output_dir=str(outdir),
+                start_date=iso_start,
+                end_date=iso_end,
+                date_format=DEFAULT_DATE_FORMAT,
+                make_zip=True,
+            )
+
+            dates = list(weekly_dates(options.start_date, options.end_date))
+            written = generate_batch(
+                template_path=str(template),
+                project=project,
+                options=options,
+                dates=dates,
+                mapping=mapping,
+                checkbox_states=check_states,
+            )
+
+            # Rain event PDFs for loaded rain days within checked months
+            if self._rain_enabled.get() and self._rain_data_ready and self._rain_days:
+                month_rain = [
+                    rd for rd in self._rain_days if start_date <= rd.date <= end_date
+                ]
+                if month_rain:
+                    original_type = (
+                        self.project_entries.get("inspection_type", tk.StringVar())
+                        .get()
+                        .strip()
+                    )
+                    rain_written = generate_rain_batch(
+                        template_path=str(template),
+                        project=project,
+                        options=options,
+                        rain_days=month_rain,
+                        mapping=mapping,
+                        checkbox_states=check_states,
+                        original_inspection_type=original_type,
+                    )
+                    written.extend(rain_written)
+
+            messagebox.showinfo(
+                "Generation Complete", self._build_success_message(written)
+            )
+
+        except ValueError as exc:
+            messagebox.showerror("Input Error", str(exc))
+        except Exception as exc:
+            messagebox.showerror(
+                "Generation Failed",
+                f"The PDF batch could not be generated.\n\n{exc}",
+            )
+
+    # --------------------------------------------------------
     #  Rain Days handlers
     # --------------------------------------------------------
     def _on_fetch_rain(self):
-        """Fetch rainfall data from Mesonet in a background thread."""
+        """Fetch rainfall data from Mesonet using checked months for the date range."""
         try:
             station_display = self.rain_station.get()
             if not station_display:
                 raise ValueError("Select a Mesonet station.")
             station_code = parse_station_code(station_display)
-
-            start_iso = self._parse_user_date_mdy(self.rain_start_date.get())
-            end_iso = self._parse_user_date_mdy(self.rain_end_date.get())
-
-            from datetime import date as date_type
-
-            start_dt = date_type.fromisoformat(start_iso)
-            end_dt = date_type.fromisoformat(end_iso)
+            start_dt, end_dt = self._resolve_rain_fetch_date_range()
         except ValueError as exc:
+            self._rain_data_ready = False
+            self._update_generate_button_state()
             self.rain_status.set(f"Error: {exc}")
             return
 
         self.rain_status.set("Fetching rainfall data from Mesonet...")
-        self._rain_generate_btn.config(state="disabled")
+        self._rain_data_ready = False
+        self._update_generate_button_state()
         self._rain_progress["value"] = 0
         self._rain_progress.grid()  # show progress bar
 
@@ -409,21 +772,20 @@ class App(tk.Tk):
     def _rain_fetch_done(self, all_days: list[RainDay], events: list[RainDay]):
         self._rain_progress.grid_remove()  # hide progress bar
         self._rain_days = events
+        self._rain_data_ready = True
+        self._update_generate_button_state()
         self.rain_status.set(
             f"Found {len(events)} rain day(s) exceeding 0.5 inches "
             f"out of {len(all_days)} total day(s)."
         )
-        if events:
-            self._rain_generate_btn.config(state="normal")
-        else:
-            self._rain_generate_btn.config(state="disabled")
 
     def _rain_fetch_error(self, exc: Exception):
         self._rain_progress.grid_remove()  # hide progress bar
+        self._rain_data_ready = False
+        self._update_generate_button_state()
         self.rain_status.set(
-            f"Fetch failed: {exc}\nUse 'Browse CSV' to load data manually."
+            f"Fetch failed: {exc}\nUse 'Load CSV' to load data manually."
         )
-        self._rain_generate_btn.config(state="disabled")
 
     def _on_browse_rain_csv(self):
         """Load rainfall CSV from a local file."""
@@ -437,86 +799,16 @@ class App(tk.Tk):
             all_days = parse_rainfall_csv_file(path)
             events = filter_rain_events(all_days)
             self._rain_days = events
+            self._rain_data_ready = True
+            self._update_generate_button_state()
             self.rain_status.set(
                 f"Loaded {len(all_days)} day(s) from file. "
                 f"{len(events)} rain day(s) exceed 0.5 inches."
             )
-            if events:
-                self._rain_generate_btn.config(state="normal")
-            else:
-                self._rain_generate_btn.config(state="disabled")
         except Exception as exc:
+            self._rain_data_ready = False
+            self._update_generate_button_state()
             self.rain_status.set(f"CSV load error: {exc}")
-            self._rain_generate_btn.config(state="disabled")
-
-    def _on_generate_rain(self):
-        """Generate rain event PDFs using the loaded rain days."""
-        if not self._rain_days:
-            self.rain_status.set("No rain days loaded. Fetch or browse CSV first.")
-            return
-
-        try:
-            template = DEFAULT_TEMPLATE
-            raw_output_dir = self.output_dir.get().strip()
-            if not raw_output_dir:
-                raise ValueError("Choose an output folder before generating files.")
-            outdir = Path(raw_output_dir)
-            outdir.mkdir(parents=True, exist_ok=True)
-
-            if not template.exists():
-                messagebox.showerror(
-                    "Template Missing", f"Template PDF not found:\n{template}"
-                )
-                return
-
-            mapping = self._current_mapping
-            if mapping is None:
-                mapping = load_mapping(DEFAULT_MAPPING)
-                self._current_mapping = mapping
-
-            proj_dict = {k: v.get().strip() for k, v in self.project_entries.items()}
-            project = build_project_info(proj_dict)
-            check_states = self._collect_checkbox_states()
-
-            original_type = (
-                self.project_entries.get("inspection_type", tk.StringVar())
-                .get()
-                .strip()
-            )
-
-            # Use a dummy date range for RunOptions (rain days have their own dates)
-            options = build_run_options(
-                output_dir=str(outdir),
-                start_date="2000-01-01",
-                end_date="2000-01-01",
-                date_format=DEFAULT_DATE_FORMAT,
-                make_zip=True,
-            )
-
-            written = generate_rain_batch(
-                template_path=str(template),
-                project=project,
-                options=options,
-                rain_days=self._rain_days,
-                mapping=mapping,
-                checkbox_states=check_states,
-                original_inspection_type=original_type,
-            )
-
-            pdf_count = sum(1 for p in written if p.lower().endswith(".pdf"))
-            self.rain_status.set(f"Generated {pdf_count} rain event PDF(s).")
-            messagebox.showinfo(
-                "Rain Event Generation Complete",
-                self._build_success_message(written),
-            )
-
-        except ValueError as exc:
-            messagebox.showerror("Input Error", str(exc))
-        except Exception as exc:
-            messagebox.showerror(
-                "Generation Failed",
-                f"Rain event PDFs could not be generated.\n\n{exc}",
-            )
 
     # --------------------------------------------------------
     #  YAML loading and form building
@@ -664,75 +956,6 @@ class App(tk.Tk):
         lines.append("")
         lines.extend(f"- {path}" for path in written)
         return "\n".join(lines)
-
-    # --------------------------------------------------------
-    #  Generate button handler
-    # --------------------------------------------------------
-    def _on_generate(self):
-        try:
-            # Template / output dir
-            template = DEFAULT_TEMPLATE
-            raw_output_dir = self.output_dir.get().strip()
-            if not raw_output_dir:
-                raise ValueError("Choose an output folder before generating files.")
-            outdir = Path(raw_output_dir)
-            outdir.mkdir(parents=True, exist_ok=True)
-
-            if not template.exists():
-                messagebox.showerror(
-                    "Template Missing", f"Template PDF not found:\n{template}"
-                )
-                return
-
-            # Parse dates
-            iso_start = self._parse_user_date_mdy(self.start_date.get())
-            iso_end = self._parse_user_date_mdy(self.end_date.get())
-
-            # Ensure mapping loaded
-            mapping = self._current_mapping
-            if mapping is None:
-                mapping = load_mapping(DEFAULT_MAPPING)
-                self._current_mapping = mapping
-
-            # Project fields -> ProjectInfo
-            proj_dict = {k: v.get().strip() for k, v in self.project_entries.items()}
-            project = build_project_info(proj_dict)
-
-            # Checklist states
-            check_states = self._collect_checkbox_states()
-
-            # RunOptions
-            options = build_run_options(
-                output_dir=str(outdir),
-                start_date=iso_start,
-                end_date=iso_end,
-                date_format=DEFAULT_DATE_FORMAT,
-                make_zip=True,
-            )
-
-            # Build list of dates for weekly inspections
-            dates = list(weekly_dates(options.start_date, options.end_date))
-
-            # Call core generator
-            written = generate_batch(
-                template_path=str(template),
-                project=project,
-                options=options,
-                dates=dates,
-                mapping=mapping,
-                checkbox_states=check_states,
-            )
-            messagebox.showinfo(
-                "Generation Complete", self._build_success_message(written)
-            )
-
-        except ValueError as exc:
-            messagebox.showerror("Input Error", str(exc))
-        except Exception as exc:
-            messagebox.showerror(
-                "Generation Failed",
-                f"The PDF batch could not be generated.\n\n{exc}",
-            )
 
 
 # ============================================================
