@@ -1,4 +1,4 @@
-from app.core.model import TemplateMap
+from app.core.model import CheckboxItem, TemplateMap
 
 
 def test_template_map_normalizes_legacy_shapes() -> None:
@@ -52,3 +52,16 @@ def test_template_map_preserves_explicit_pdf_targets() -> None:
     assert mapping.fields["job_piece"].target_name == "JP_Field"
     assert mapping.date_fields[0].target_name == "Date_Field"
     assert mapping.date_fields[0].format == "%Y-%m-%d"
+
+
+def test_checkbox_item_defaults_are_safe() -> None:
+    """Explicit targets without value overrides must default to /Off (no-render)."""
+    item = CheckboxItem(
+        text="Sample question",
+        yes_field="field_yes",
+        no_field="field_no",
+        na_field="field_na",
+    )
+    assert item.yes_value == "/On"
+    assert item.no_value == "/Off"
+    assert item.na_value == "/Off"

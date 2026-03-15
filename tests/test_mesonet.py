@@ -6,7 +6,13 @@ from datetime import date
 
 import pytest
 
-from app.core.mesonet import RainDay, filter_rain_events, parse_rainfall_csv
+from app.core.mesonet import (
+    FetchResult,
+    RainDay,
+    fetch_rainfall,
+    filter_rain_events,
+    parse_rainfall_csv,
+)
 
 # ============================================================
 #  Sample CSV fixtures
@@ -88,11 +94,11 @@ class TestFilterRainEvents:
         assert 1.20 in amounts
         assert 0.51 in amounts
 
-    def test_exact_threshold_excluded(self):
-        """Exactly 0.5 should NOT qualify (strict greater-than)."""
+    def test_exact_threshold_included(self):
+        """Exactly 0.5 should qualify (greater-than-or-equal)."""
         days = [RainDay(date=date(2025, 1, 1), rainfall_inches=0.5)]
         events = filter_rain_events(days)
-        assert len(events) == 0
+        assert len(events) == 1
 
     def test_just_above_threshold(self):
         days = [RainDay(date=date(2025, 1, 1), rainfall_inches=0.51)]
@@ -116,3 +122,51 @@ class TestFilterRainEvents:
 
     def test_empty_input(self):
         assert filter_rain_events([]) == []
+
+
+# ============================================================
+#  fetch_rainfall failure tracking
+# ============================================================
+
+
+class TestFetchRainfallFailures:
+
+    def test_counts_failed_days(self, monkeypatch):
+        """HTTP failures should be counted in FetchResult.failed."""
+        import requests as _requests
+
+        from app.core import mesonet as _mod
+
+        def _fake_fetch(station, utc_day, utc_time):
+            # Simulate HTTP error for the end-of-day fetch on Jan 2
+            if utc_day == date(2025, 1, 2) and utc_time == "23:55:00Z":
+                raise _requests.ConnectionError("simulated")
+            return 1.27  # ~0.05 inches
+
+        monkeypatch.setattr(_mod, "_fetch_rain_mm_at", _fake_fetch)
+
+        result = fetch_rainfall("FAKE", date(2025, 1, 1), date(2025, 1, 3))
+
+        assert isinstance(result, FetchResult)
+        assert result.failed == 1
+        assert result.missing == 0
+        assert len(result.days) == 2
+
+    def test_counts_missing_days(self, monkeypatch):
+        """Days with None rain data should be counted in FetchResult.missing."""
+        from app.core import mesonet as _mod
+
+        def _fake_fetch(station, utc_day, utc_time):
+            # Return None for the end-of-day fetch on Jan 2 (missing data)
+            if utc_day == date(2025, 1, 2) and utc_time == "23:55:00Z":
+                return None
+            return 1.27  # ~0.05 inches
+
+        monkeypatch.setattr(_mod, "_fetch_rain_mm_at", _fake_fetch)
+
+        result = fetch_rainfall("FAKE", date(2025, 1, 1), date(2025, 1, 3))
+
+        assert isinstance(result, FetchResult)
+        assert result.missing == 1
+        assert result.failed == 0
+        assert len(result.days) == 2

@@ -6,7 +6,10 @@
 #  CSV snapshots for all stations without requiring CAPTCHA.
 #
 #  RAIN values in MDF files are cumulative mm since midnight
-#  UTC.  The 23:55 observation gives the daily total.
+#  UTC.  Because Oklahoma is UTC−6 (CST) or UTC−5 (CDT), a
+#  single 23:55 UTC snapshot misses rain that falls during the
+#  local evening.  We therefore combine two UTC observations
+#  per local day to reconstruct the full local-day total.
 # ============================================================
 
 from __future__ import annotations
@@ -14,10 +17,10 @@ from __future__ import annotations
 import csv
 import io
 import logging
-import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import requests
@@ -31,10 +34,10 @@ log = logging.getLogger(__name__)
 MESONET_API_BASE = "https://api.prod.mesonet.org/index.php"
 MDF_EXPORT_URL = f"{MESONET_API_BASE}/export/mesonet_data_files"
 
-# Delay between sequential day requests (seconds) – be polite
-REQUEST_DELAY = 0.25
-
 REQUEST_TIMEOUT = 30  # seconds per HTTP request
+
+# Maximum parallel requests – polite but fast
+MAX_WORKERS = 8
 
 # MDF RAIN column is in millimetres; we convert to inches.
 _MM_PER_INCH = 25.4
@@ -53,19 +56,62 @@ class RainDay:
     rainfall_inches: float
 
 
+@dataclass
+class FetchResult:
+    """Result of a fetch_rainfall call, including failure and missing counts."""
+
+    days: list[RainDay]
+    failed: int
+    missing: int
+
+
+# ============================================================
+#  Local-time helpers
+# ============================================================
+
+
+def _utc_offset_hours(day: date) -> int:
+    """UTC offset in hours for Oklahoma on *day* (−6 CST or −5 CDT).
+
+    US Central Time DST runs from the 2nd Sunday of March to the
+    1st Sunday of November.
+    """
+    year = day.year
+    # 2nd Sunday of March: find March 1 weekday, compute 2nd Sunday
+    mar1_wd = date(year, 3, 1).weekday()  # Mon=0, Sun=6
+    dst_start = date(year, 3, (13 - mar1_wd) % 7 + 8)
+    # 1st Sunday of November
+    nov1_wd = date(year, 11, 1).weekday()
+    dst_end = date(year, 11, (6 - nov1_wd) % 7 + 1)
+    if dst_start <= day < dst_end:
+        return -5  # CDT
+    return -6  # CST
+
+
+def _boundary_utc_time(day: date) -> str:
+    """MDF observation time nearest local midnight at the start of *day*.
+
+    Oklahoma local midnight = ``-offset``:00 UTC.  We use the ``:55``
+    observation of the preceding hour so it falls just before midnight.
+    """
+    hour = -_utc_offset_hours(day) - 1  # 5 for CST, 4 for CDT
+    return f"{hour:02d}:55:00Z"
+
+
 # ============================================================
 #  HTTP Fetch  (MDF endpoint – no CAPTCHA required)
 # ============================================================
 
 
-def _fetch_day_rain_mm(station: str, day: date) -> float | None:
-    """Fetch the cumulative daily rainfall (mm) for *station* on *day*.
+def _fetch_rain_mm_at(station: str, utc_day: date, utc_time: str) -> float | None:
+    """Fetch cumulative RAIN (mm) for *station* at a specific UTC time.
 
     Returns ``None`` when the station is not found in the response or
     the RAIN value is a missing-data sentinel (< -990).
+    Raises ``requests.RequestException`` on HTTP errors.
     """
     params = {
-        "date": f"{day.isoformat()}T23:55:00Z",
+        "date": f"{utc_day.isoformat()}T{utc_time}",
         "type": "mdf",
         "format": "csv",
     }
@@ -91,52 +137,119 @@ def fetch_rainfall(
     start: date,
     end: date,
     progress: Callable[[int, int], None] | None = None,
-) -> list[RainDay]:
-    """Fetch daily rainfall for one station over a date range.
+) -> FetchResult:
+    """Fetch daily rainfall for one station, adjusted for local Oklahoma time.
 
-    Makes one lightweight HTTP GET per day against the public MDF
-    CSV endpoint.  Returns a list of ``RainDay`` objects with
-    rainfall converted to inches.  Days with missing data are
-    silently skipped.
+    For each local day, two parts of the UTC timeline are combined:
 
-    *progress*, if provided, is called as ``progress(day_num, total_days)``
-    after each day is fetched.
+    * **Daytime portion** – ``RAIN@23:55 UTC(D) − RAIN@boundary(D)``
+      covers local midnight through ~6 PM.
+    * **Evening portion** – ``RAIN@boundary(D+1)``
+      covers ~6 PM through local midnight.
+
+    All required MDF observations are fetched in parallel (bounded by
+    ``MAX_WORKERS``) for speed, then assembled sequentially.
     """
     if start > end:
         raise ValueError("start date must be on or before end date")
 
-    results: list[RainDay] = []
-    current = start
-    day_num = 0
     total_days = (end - start).days + 1
 
+    # ------------------------------------------------------------------
+    #  1. Build the set of unique (utc_day, utc_time) observation keys.
+    #     For N local days we need:
+    #       - N end-of-day observations: (D, "23:55:00Z") for each D
+    #       - N+1 boundary observations: boundary(start) .. boundary(end+1)
+    #     Total ≈ 2N + 1 HTTP requests, all fired in parallel.
+    # ------------------------------------------------------------------
+    ObsKey = tuple[date, str]  # (utc_day, utc_time)
+
+    eod_keys: list[ObsKey] = []
+    boundary_keys: list[ObsKey] = []
+    all_keys: set[ObsKey] = set()
+
+    current = start
     while current <= end:
-        if day_num > 0:
-            time.sleep(REQUEST_DELAY)
-        day_num += 1
-
-        log.info("Fetching day %d/%d: %s", day_num, total_days, current)
-        try:
-            rain_mm = _fetch_day_rain_mm(station, current)
-        except requests.RequestException as exc:
-            log.warning("HTTP error for %s: %s", current, exc)
-            current += timedelta(days=1)
-            continue
-
-        if rain_mm is not None:
-            results.append(
-                RainDay(
-                    date=current,
-                    rainfall_inches=rain_mm / _MM_PER_INCH,
-                )
-            )
-
-        if progress is not None:
-            progress(day_num, total_days)
-
+        eod_key: ObsKey = (current, "23:55:00Z")
+        bnd_key: ObsKey = (current, _boundary_utc_time(current))
+        eod_keys.append(eod_key)
+        all_keys.add(eod_key)
+        boundary_keys.append(bnd_key)
+        all_keys.add(bnd_key)
         current += timedelta(days=1)
 
-    return results
+    # One extra boundary for the evening portion of the last local day
+    next_after_end = end + timedelta(days=1)
+    last_bnd: ObsKey = (next_after_end, _boundary_utc_time(next_after_end))
+    boundary_keys.append(last_bnd)
+    all_keys.add(last_bnd)
+
+    # ------------------------------------------------------------------
+    #  2. Fetch all observations in parallel.
+    # ------------------------------------------------------------------
+    # result_map values: float | None (data), or "error" sentinel
+    _ERROR = "error"
+    result_map: dict[ObsKey, float | None | str] = {}
+    completed = 0
+
+    def _do_fetch(key: ObsKey) -> tuple[ObsKey, float | None]:
+        return key, _fetch_rain_mm_at(station, key[0], key[1])
+
+    key_list = list(all_keys)
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        futures = {pool.submit(_do_fetch, k): k for k in key_list}
+        for future in as_completed(futures):
+            key = futures[future]
+            try:
+                _, val = future.result()
+                result_map[key] = val
+            except requests.RequestException as exc:
+                log.warning("HTTP error for %s %s: %s", key[0], key[1], exc)
+                result_map[key] = _ERROR
+
+            completed += 1
+            if progress is not None:
+                # Map completed fetches → approximate day progress
+                approx_day = min(
+                    int(completed / len(key_list) * total_days) + 1,
+                    total_days,
+                )
+                progress(approx_day, total_days)
+
+    # ------------------------------------------------------------------
+    #  3. Assemble local-day rainfall from the fetched observations.
+    # ------------------------------------------------------------------
+    results: list[RainDay] = []
+    failed = 0
+    missing = 0
+
+    for day_idx in range(total_days):
+        day = start + timedelta(days=day_idx)
+        eod_key = eod_keys[day_idx]
+        morn_key = boundary_keys[day_idx]
+        eve_key = boundary_keys[day_idx + 1]
+
+        eod_val = result_map.get(eod_key)
+        morn_val = result_map.get(morn_key)
+        eve_val = result_map.get(eve_key)
+
+        if _ERROR in (eod_val, morn_val, eve_val):
+            failed += 1
+            continue
+
+        if eod_val is not None and morn_val is not None and eve_val is not None:
+            local_rain_mm = (eod_val - morn_val) + eve_val
+            results.append(
+                RainDay(
+                    date=day,
+                    rainfall_inches=max(local_rain_mm, 0.0) / _MM_PER_INCH,
+                )
+            )
+        else:
+            missing += 1
+            log.info("Missing data for %s on %s", station, day)
+
+    return FetchResult(days=results, failed=failed, missing=missing)
 
 
 # ============================================================
@@ -236,8 +349,8 @@ def filter_rain_events(
     rain_days: list[RainDay],
     threshold: float = 0.5,
 ) -> list[RainDay]:
-    """Return only days where daily rainfall exceeds *threshold* (inches).
+    """Return only days where daily rainfall meets or exceeds *threshold* (inches).
 
-    Default threshold is 0.5 inches (strict greater-than).
+    Default threshold is 0.5 inches (greater-than-or-equal).
     """
-    return [rd for rd in rain_days if rd.rainfall_inches > threshold]
+    return [rd for rd in rain_days if rd.rainfall_inches >= threshold]

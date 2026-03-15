@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import calendar as cal_mod
+import random
 import sys
 import threading
 import tkinter as tk
@@ -32,6 +33,7 @@ from app.core.config_manager import build_project_info, build_run_options, load_
 from app.core.dates import weekly_dates
 from app.core.fill import generate_batch
 from app.core.mesonet import (
+    FetchResult,
     RainDay,
     fetch_rainfall,
     filter_rain_events,
@@ -58,6 +60,19 @@ def _bundle_path(relative: str) -> Path:
 DEFAULT_DATE_FORMAT = "%m/%d/%Y"
 DEFAULT_TEMPLATE = _bundle_path("assets/template.pdf")
 DEFAULT_MAPPING = _bundle_path("app/core/config_example.yaml")
+
+_LOREM_WORDS = (
+    "lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod "
+    "tempor incididunt ut labore et dolore magna aliqua ut enim ad minim "
+    "veniam quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea "
+    "commodo consequat duis aute irure dolor in reprehenderit voluptate velit "
+    "esse cillum fugiat nulla pariatur excepteur sint occaecat cupidatat non "
+    "proident sunt in culpa qui officia deserunt mollit anim id est laborum"
+).split()
+
+
+def _random_lorem(word_count: int = 4) -> str:
+    return " ".join(random.choice(_LOREM_WORDS) for _ in range(word_count)).title()
 
 
 # ============================================================
@@ -241,7 +256,6 @@ class App(tk.Tk):
         self.minsize(1100, 700)
 
         # --- STATE VARIABLES ---
-        self.output_dir = tk.StringVar()
         self.start_date = tk.StringVar()
         self.end_date = tk.StringVar()
 
@@ -250,6 +264,9 @@ class App(tk.Tk):
 
         # Checklists: group_key -> {label_text: tk.StringVar}
         self.checkbox_vars: dict[str, dict[str, tk.StringVar]] = {}
+
+        # Notes: group_key -> tk.Text widget
+        self.notes_vars: dict[str, tk.Text] = {}
 
         # Mapping loaded from YAML
         self._current_mapping: TemplateMap | None = None
@@ -269,6 +286,7 @@ class App(tk.Tk):
         # --- RAIN DAYS STATE ---
         self.rain_station = tk.StringVar()
         self.rain_status = tk.StringVar(value="")
+        self._rain_days_detail = tk.StringVar(value="")
         self._rain_days: list[RainDay] = []
         self._rain_data_ready = False
 
@@ -317,24 +335,26 @@ class App(tk.Tk):
         left.grid(row=2, column=0, sticky="nsew", padx=(10, 5), pady=5)
         left.columnconfigure(1, weight=1)
 
-        # -- Output + Dates --
         lr = 0
-        ttk.Label(left, text="Output Folder:").grid(row=lr, column=0, sticky="e", **pad)
-        out_row = ttk.Frame(left)
-        out_row.grid(row=lr, column=1, sticky="ew", **pad)
-        out_row.columnconfigure(0, weight=1)
-        ttk.Entry(out_row, textvariable=self.output_dir).grid(
-            row=0, column=0, sticky="ew"
-        )
-        ttk.Button(out_row, text="Browse", command=self._pick_output).grid(
-            row=0, column=1, padx=(6, 0)
-        )
-        lr += 1
 
         # -- Project Fields --
-        ttk.Label(left, text="Project Fields", font=("Segoe UI", 10, "bold")).grid(
-            row=lr, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 4)
+        proj_header = ttk.Frame(left)
+        proj_header.grid(
+            row=lr, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 4)
         )
+        ttk.Label(proj_header, text="Project Info", font=("Segoe UI", 10, "bold")).pack(
+            side="left"
+        )
+        tk.Button(
+            proj_header,
+            text="T",
+            width=2,
+            height=1,
+            font=("Segoe UI", 7, "bold"),
+            relief="raised",
+            bg="#f0f0f0",
+            command=self._fill_test_fields,
+        ).pack(side="right", padx=(2, 0))
         lr += 1
 
         self.fields_inner = ttk.Frame(left, borderwidth=1, relief="groove")
@@ -466,6 +486,18 @@ class App(tk.Tk):
         self.rain_station_combo.grid(row=rr, column=0, sticky="w", pady=(0, 3))
         rr += 1
 
+        # Rain days detail list (hidden until data available)
+        self._rain_days_detail_label = ttk.Label(
+            self._rain_section_frame,
+            textvariable=self._rain_days_detail,
+            foreground="#336699",
+            wraplength=400,
+            anchor="w",
+        )
+        self._rain_days_detail_label.grid(row=rr, column=0, sticky="w", pady=(2, 0))
+        self._rain_days_detail_label.grid_remove()
+        rr += 1
+
         # Progress bar (hidden until fetch)
         self._rain_progress = ttk.Progressbar(
             self._rain_section_frame,
@@ -508,11 +540,37 @@ class App(tk.Tk):
         right.columnconfigure(0, weight=1)
         right.rowconfigure(1, weight=1)
 
-        ttk.Label(right, text="Checklist", font=("Segoe UI", 10, "bold")).grid(
-            row=0, column=0, sticky="w", padx=10, pady=(0, 4)
+        chk_header = ttk.Frame(right)
+        chk_header.grid(row=0, column=0, sticky="ew", padx=10, pady=(0, 4))
+        ttk.Label(chk_header, text="Checklist", font=("Segoe UI", 10, "bold")).pack(
+            side="left"
         )
-        self.checks_area = ScrollableFrame(right)
-        self.checks_area.grid(row=1, column=0, sticky="nsew", padx=0, pady=(0, 10))
+        tk.Button(
+            chk_header,
+            text="N",
+            width=2,
+            height=1,
+            font=("Segoe UI", 7, "bold"),
+            relief="raised",
+            bg="#f0f0f0",
+            command=self._fill_test_notes,
+        ).pack(side="right", padx=(2, 0))
+        tk.Button(
+            chk_header,
+            text="T",
+            width=2,
+            height=1,
+            font=("Segoe UI", 7, "bold"),
+            relief="raised",
+            bg="#f0f0f0",
+            command=self._fill_test_checklist,
+        ).pack(side="right", padx=(2, 0))
+        checks_border = ttk.Frame(right, borderwidth=1, relief="groove")
+        checks_border.grid(row=1, column=0, sticky="nsew", padx=0, pady=(0, 10))
+        checks_border.columnconfigure(0, weight=1)
+        checks_border.rowconfigure(0, weight=1)
+        self.checks_area = ScrollableFrame(checks_border)
+        self.checks_area.grid(row=0, column=0, sticky="nsew")
 
     def _configure_grid(self):
         self.columnconfigure(0, weight=1)
@@ -536,14 +594,6 @@ class App(tk.Tk):
         x = (scr_w - w) // 2
         y = max((scr_h - h) // 2 - 30, 0)
         self.geometry(f"{w}x{h}+{x}+{y}")
-
-    # --------------------------------------------------------
-    #  Output folder selection
-    # --------------------------------------------------------
-    def _pick_output(self):
-        base = filedialog.askdirectory(title="Choose output folder")
-        if base:
-            self.output_dir.set(str(Path(base)))
 
     # --------------------------------------------------------
     #  Custom date toggle helpers
@@ -584,9 +634,24 @@ class App(tk.Tk):
         for checkbutton in self._month_checkbuttons:
             checkbutton.configure(state=state)
 
+    def _show_rain_days_detail(self, events: list[RainDay]):
+        if events:
+            sorted_events = sorted(events, key=lambda rd: rd.date)
+            lines = [
+                f"  {rd.date.strftime('%b %d, %Y')}  —  {rd.rainfall_inches:.2f}\""
+                for rd in sorted_events
+            ]
+            self._rain_days_detail.set("Rain days found:\n" + "\n".join(lines))
+            self._rain_days_detail_label.grid()
+        else:
+            self._rain_days_detail.set("")
+            self._rain_days_detail_label.grid_remove()
+
     def _invalidate_rain_data(self):
         self._rain_data_ready = False
         self._rain_days = []
+        self._rain_days_detail.set("")
+        self._rain_days_detail_label.grid_remove()
         if self._rain_enabled.get() and self.rain_status.get():
             self.rain_status.set("Rain data needs to be fetched or loaded.")
         self._update_generate_button_state()
@@ -648,9 +713,9 @@ class App(tk.Tk):
             start_date, end_date = self._resolve_selected_date_range()
 
             template = DEFAULT_TEMPLATE
-            raw_output_dir = self.output_dir.get().strip()
+            raw_output_dir = filedialog.askdirectory(title="Choose output folder")
             if not raw_output_dir:
-                raise ValueError("Choose an output folder before generating files.")
+                return
             outdir = Path(raw_output_dir)
             outdir.mkdir(parents=True, exist_ok=True)
 
@@ -668,6 +733,7 @@ class App(tk.Tk):
             proj_dict = {k: v.get().strip() for k, v in self.project_entries.items()}
             project = build_project_info(proj_dict)
             check_states = self._collect_checkbox_states()
+            notes_texts = self._collect_notes_texts()
 
             iso_start = start_date.isoformat()
             iso_end = end_date.isoformat()
@@ -688,6 +754,7 @@ class App(tk.Tk):
                 dates=dates,
                 mapping=mapping,
                 checkbox_states=check_states,
+                notes_texts=notes_texts,
             )
 
             # Rain event PDFs for loaded rain days within checked months
@@ -708,6 +775,7 @@ class App(tk.Tk):
                         rain_days=month_rain,
                         mapping=mapping,
                         checkbox_states=check_states,
+                        notes_texts=notes_texts,
                         original_inspection_type=original_type,
                     )
                     written.extend(rain_written)
@@ -754,11 +822,19 @@ class App(tk.Tk):
 
         def _worker():
             try:
-                all_days = fetch_rainfall(
+                result = fetch_rainfall(
                     station_code, start_dt, end_dt, progress=_on_progress
                 )
-                events = filter_rain_events(all_days)
-                self.after(0, lambda: self._rain_fetch_done(all_days, events))
+                events = filter_rain_events(result.days)
+                self.after(
+                    0,
+                    lambda: self._rain_fetch_done(
+                        result.days,
+                        events,
+                        result.failed,
+                        result.missing,
+                    ),
+                )
             except Exception as exc:
                 self.after(0, lambda e=exc: self._rain_fetch_error(e))
 
@@ -769,15 +845,27 @@ class App(tk.Tk):
         self._rain_progress["value"] = pct
         self.rain_status.set(f"Fetching day {day_num} of {total_days}  ({pct}%)")
 
-    def _rain_fetch_done(self, all_days: list[RainDay], events: list[RainDay]):
+    def _rain_fetch_done(
+        self,
+        all_days: list[RainDay],
+        events: list[RainDay],
+        failed: int = 0,
+        missing: int = 0,
+    ):
         self._rain_progress.grid_remove()  # hide progress bar
         self._rain_days = events
         self._rain_data_ready = True
         self._update_generate_button_state()
-        self.rain_status.set(
-            f"Found {len(events)} rain day(s) exceeding 0.5 inches "
+        msg = (
+            f"Found {len(events)} rain day(s) with 0.5+ inches "
             f"out of {len(all_days)} total day(s)."
         )
+        if failed:
+            msg += f"  \u26a0 {failed} day(s) failed to fetch."
+        if missing:
+            msg += f"  \u26a0 {missing} day(s) had missing data."
+        self.rain_status.set(msg)
+        self._show_rain_days_detail(events)
 
     def _rain_fetch_error(self, exc: Exception):
         self._rain_progress.grid_remove()  # hide progress bar
@@ -803,8 +891,9 @@ class App(tk.Tk):
             self._update_generate_button_state()
             self.rain_status.set(
                 f"Loaded {len(all_days)} day(s) from file. "
-                f"{len(events)} rain day(s) exceed 0.5 inches."
+                f"{len(events)} rain day(s) with 0.5+ inches."
             )
+            self._show_rain_days_detail(events)
         except Exception as exc:
             self._rain_data_ready = False
             self._update_generate_button_state()
@@ -821,6 +910,7 @@ class App(tk.Tk):
             c.destroy()
         self.project_entries.clear()
         self.checkbox_vars.clear()
+        self.notes_vars.clear()
 
         # Load mapping
         try:
@@ -923,6 +1013,35 @@ class App(tk.Tk):
                     btn.grid(row=i, column=j, padx=4, pady=2)
 
             self.checkbox_vars[group_key] = row_vars
+
+            # Notes text box for this section
+            if group.notes_field:
+                notes_row = len(pdf_list) + 1
+                ttk.Label(grp_frame, text="Notes:", anchor="w").grid(
+                    row=notes_row,
+                    column=0,
+                    columnspan=4,
+                    sticky="w",
+                    padx=6,
+                    pady=(6, 0),
+                )
+                notes_text = tk.Text(
+                    grp_frame,
+                    height=4,
+                    width=10,
+                    wrap="word",
+                    font=("Segoe UI", 9),
+                )
+                notes_text.grid(
+                    row=notes_row + 1,
+                    column=0,
+                    columnspan=4,
+                    sticky="ew",
+                    padx=6,
+                    pady=(0, 6),
+                )
+                self.notes_vars[group_key] = notes_text
+
             cr += 1
 
     # --------------------------------------------------------
@@ -941,10 +1060,56 @@ class App(tk.Tk):
             raise ValueError(f"Invalid date '{s}'. Use MM/DD/YYYY.") from exc
         return dt.strftime("%Y-%m-%d")
 
+    # --------------------------------------------------------
+    #  Test-data helpers
+    # --------------------------------------------------------
+    def _fill_test_fields(self):
+        for var in self.project_entries.values():
+            var.set(_random_lorem(random.randint(2, 5)))
+
+    def _fill_test_checklist(self):
+        for group_key, group in self.checkbox_vars.items():
+            for _label, var in group.items():
+                var.set(random.choice(["YES", "NO"]))
+        # Refresh toggle-button visuals
+        for group_key in self.checkbox_vars:
+            mapping_group = self._current_mapping.checkboxes[group_key]
+            pdf_list = getattr(mapping_group, "pdf_fields", []) or []
+            parent = None
+            for w in self.checks_area.inner.winfo_children():
+                if (
+                    isinstance(w, ttk.LabelFrame)
+                    and w.cget("text") == group_key.replace("_", " ").title()
+                ):
+                    parent = w
+                    break
+            if parent is None:
+                continue
+            for i, item in enumerate(pdf_list, start=1):
+                val = self.checkbox_vars[group_key].get(item.text, tk.StringVar()).get()
+                for sib in parent.grid_slaves(row=i):
+                    if isinstance(sib, tk.Button):
+                        if sib.cget("text") == val:
+                            sib.config(relief="sunken", bg="#cde9ff")
+                        else:
+                            sib.config(relief="raised", bg="#f0f0f0")
+
+    def _fill_test_notes(self):
+        for widget in self.notes_vars.values():
+            widget.delete("1.0", "end")
+            widget.insert("1.0", _random_lorem(random.randint(8, 20)))
+
     def _collect_checkbox_states(self) -> dict[str, dict[str, str]]:
         return {
             group_key: {item: var.get() for item, var in group.items()}
             for group_key, group in self.checkbox_vars.items()
+        }
+
+    def _collect_notes_texts(self) -> dict[str, str]:
+        return {
+            group_key: widget.get("1.0", "end-1c").strip()
+            for group_key, widget in self.notes_vars.items()
+            if widget.get("1.0", "end-1c").strip()
         }
 
     def _build_success_message(self, written: list[str]) -> str:

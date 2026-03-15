@@ -32,6 +32,7 @@ from app.core.pdf_fields import populate_checkbox_targets
 #  Small Helpers
 # ============================================================
 
+
 def _project_to_dict(project: ProjectInfo) -> Dict[str, Any]:
     if hasattr(project, "model_dump"):
         return project.model_dump(exclude_none=True)
@@ -47,7 +48,7 @@ def _date_to_string(dt: Any, date_format: str) -> str:
       - datetime / date -> strftime
       - anything else   -> str()
     """
-    if isinstance(dt, (datetime, )):
+    if isinstance(dt, (datetime,)):
         return dt.strftime(date_format)
     # datetime.date or similar has .strftime too
     if hasattr(dt, "strftime"):
@@ -64,6 +65,7 @@ def _build_field_updates(
     dt: Any,
     default_date_format: str,
     checkbox_states: Optional[Dict[str, Dict[str, str]]] = None,
+    notes_texts: Optional[Dict[str, str]] = None,
 ) -> Dict[str, str]:
     field_updates: Dict[str, str] = {}
 
@@ -93,24 +95,39 @@ def _build_field_updates(
             elif answer == "N/A" and item.na_field:
                 field_updates[item.na_field] = item.na_value
 
+    notes = notes_texts or {}
+    for group_key, group in mapping.checkboxes.items():
+        if group.notes_field and group_key in notes:
+            field_updates[group.notes_field] = notes[group_key]
+
     return field_updates
 
 
-def _write_filled_pdf(template: Path, pdf_out: Path, field_updates: Dict[str, str]) -> None:
+def _write_filled_pdf(
+    template: Path, pdf_out: Path, field_updates: Dict[str, str]
+) -> None:
     try:
         reader = PdfReader(str(template))
     except Exception as exc:
-        raise ValueError(f"Template PDF is not readable by pypdf: {template}. {exc}") from exc
+        raise ValueError(
+            f"Template PDF is not readable by pypdf: {template}. {exc}"
+        ) from exc
 
     available_fields = set((reader.get_fields() or {}).keys())
     if field_updates and not available_fields:
-        raise ValueError(f"Template PDF does not contain fillable AcroForm fields: {template}")
+        raise ValueError(
+            f"Template PDF does not contain fillable AcroForm fields: {template}"
+        )
 
-    missing_fields = sorted(name for name in field_updates if name not in available_fields)
+    missing_fields = sorted(
+        name for name in field_updates if name not in available_fields
+    )
     if missing_fields:
         preview = ", ".join(missing_fields[:10])
         suffix = "" if len(missing_fields) <= 10 else ", ..."
-        raise ValueError(f"Template PDF is missing mapped form fields: {preview}{suffix}")
+        raise ValueError(
+            f"Template PDF is missing mapped form fields: {preview}{suffix}"
+        )
 
     writer = PdfWriter()
     writer.clone_document_from_reader(reader)
@@ -125,6 +142,7 @@ def _write_filled_pdf(template: Path, pdf_out: Path, field_updates: Dict[str, st
 #  Main Entry Point
 # ============================================================
 
+
 def generate_batch(
     *,
     template_path: str,
@@ -133,6 +151,7 @@ def generate_batch(
     dates: Iterable[Any],
     mapping: TemplateMap,
     checkbox_states: Optional[Dict[str, Any]] = None,
+    notes_texts: Optional[Dict[str, str]] = None,
 ) -> List[str]:
     """
     Generate one inspection PDF per date.
@@ -194,6 +213,7 @@ def generate_batch(
             dt=dt,
             default_date_format=options.date_format,
             checkbox_states=checks,
+            notes_texts=notes_texts,
         )
         _write_filled_pdf(template, pdf_out, field_updates)
         created.append(str(pdf_out))

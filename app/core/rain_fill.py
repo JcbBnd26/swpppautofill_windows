@@ -14,8 +14,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from app.core.fill import (_build_field_updates, _date_to_string,
-                           _project_to_dict, _write_filled_pdf)
+from app.core.fill import (
+    _build_field_updates,
+    _date_to_string,
+    _project_to_dict,
+    _write_filled_pdf,
+)
 from app.core.mesonet import RainDay
 from app.core.model import ProjectInfo, RunOptions, TemplateMap
 from app.core.pdf_fields import populate_checkbox_targets
@@ -29,6 +33,7 @@ def generate_rain_batch(
     rain_days: list[RainDay],
     mapping: TemplateMap,
     checkbox_states: Optional[Dict[str, Any]] = None,
+    notes_texts: Optional[Dict[str, str]] = None,
     original_inspection_type: str = "",
 ) -> List[str]:
     """
@@ -79,6 +84,7 @@ def generate_rain_batch(
             dt=dt,
             default_date_format=options.date_format,
             checkbox_states=checks,
+            notes_texts=notes_texts,
         )
         _write_filled_pdf(template, pdf_out, field_updates)
         created.append(str(pdf_out))

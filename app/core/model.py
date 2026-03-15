@@ -55,8 +55,8 @@ class CheckboxItem(BaseModel):
     no_field: str | None = None
     na_field: str | None = None
     yes_value: str = "/On"
-    no_value: str = "/On"
-    na_value: str = "/On"
+    no_value: str = "/Off"
+    na_value: str = "/Off"
 
     @classmethod
     def from_raw(cls, raw: Any) -> "CheckboxItem":
@@ -76,6 +76,7 @@ class CheckboxItem(BaseModel):
 class CheckboxGroup(BaseModel):
     pdf_fields: list[CheckboxItem] = Field(default_factory=list)
     labels: list[str] = Field(default_factory=list)
+    notes_field: str | None = None
 
     @field_validator("pdf_fields", mode="before")
     @classmethod

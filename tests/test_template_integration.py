@@ -6,10 +6,15 @@ from app.core.config_manager import build_project_info, build_run_options, load_
 from app.core.dates import weekly_dates
 from app.core.fill import generate_batch
 
+TEMPLATE = Path(__file__).resolve().parents[1] / "assets" / "template.pdf"
+MAPPING_FILE = (
+    Path(__file__).resolve().parents[1] / "app" / "core" / "config_example.yaml"
+)
+
 
 def test_real_template_text_fields_fill(tmp_path) -> None:
-    template_path = Path("assets/template.pdf")
-    mapping_path = Path("app/core/config_example.yaml")
+    template_path = TEMPLATE
+    mapping_path = MAPPING_FILE
 
     assert template_path.exists()
     assert mapping_path.exists()
