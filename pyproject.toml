@@ -8,7 +8,7 @@ include = ["app*"]
 
 [project]
 name = "swppp-autofill"
-version = "0.2.0"
+version = "1.0.0"
 description = "Weekly PDF form generator with simple GUI"
 authors = [{name = "You"}]
 requires-python = ">=3.10"

@@ -1,4 +1,5 @@
 import json
+from datetime import date as date_cls
 from pathlib import Path
 from typing import Optional
 
@@ -12,6 +13,9 @@ from app.core.config_manager import (
 )
 from app.core.dates import weekly_dates
 from app.core.fill import generate_batch
+from app.core.mesonet import fetch_rainfall, filter_rain_events
+from app.core.mesonet_stations import STATIONS
+from app.core.rain_fill import generate_rain_batch
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
@@ -31,6 +35,15 @@ def run(
     ),
     date_format: str = typer.Option("%m/%d/%Y", help="Date format to write into PDF"),
     no_zip: bool = typer.Option(False, help="Do not create a ZIP of outputs"),
+    station: Optional[str] = typer.Option(
+        None, help="Mesonet station code (e.g. NRMN) for rain day PDFs"
+    ),
+    rain_threshold: float = typer.Option(
+        0.5, help="Rainfall threshold in inches (default 0.5)"
+    ),
+    rain_csv: Optional[Path] = typer.Option(
+        None, help="Path to a Mesonet rainfall CSV instead of fetching"
+    ),
 ):
     if config is None:
         config = Path(__file__).parent.parent / "core" / "config_example.yaml"
@@ -73,6 +86,50 @@ def run(
         dates=dates,
         mapping=mapping,
     )
+
+    # --- Rain day PDFs ---
+    if station or rain_csv:
+        from app.core.mesonet import parse_rainfall_csv_file
+
+        if rain_csv:
+            typer.echo(f"\nLoading rain data from {rain_csv} ...")
+            all_days = parse_rainfall_csv_file(rain_csv)
+        else:
+            code = station.upper()
+            if code not in STATIONS:
+                typer.echo(
+                    f"Warning: '{code}' is not a known Mesonet station code.",
+                    err=True,
+                )
+            s = date_cls.fromisoformat(start_date)
+            e = date_cls.fromisoformat(end_date)
+            typer.echo(f"\nFetching rain data for {code} ({s} to {e}) ...")
+            result = fetch_rainfall(code, s, e)
+            all_days = result.days
+            if result.failed:
+                typer.echo(f"  Warning: {result.failed} day(s) failed to fetch.")
+            if result.missing:
+                typer.echo(f"  Warning: {result.missing} day(s) had missing data.")
+
+        events = filter_rain_events(all_days, threshold=rain_threshold)
+        typer.echo(
+            f"  {len(events)} rain day(s) with {rain_threshold}+ inches "
+            f"out of {len(all_days)} total."
+        )
+        for rd in sorted(events, key=lambda r: r.date):
+            typer.echo(f'    {rd.date}  —  {rd.rainfall_inches:.2f}"')
+
+        if events:
+            rain_written = generate_rain_batch(
+                template_path=str(template),
+                project=project,
+                options=options,
+                rain_days=events,
+                mapping=mapping,
+                original_inspection_type=project.inspection_type or "",
+            )
+            written.extend(rain_written)
+
     typer.echo("\nCreated:")
     for p in written:
         typer.echo(f"  - {p}")
