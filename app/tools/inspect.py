@@ -7,8 +7,7 @@ import yaml
 from pypdf import PdfReader
 
 from app.core.config_manager import load_mapping
-from app.core.pdf_fields import (build_audit_mapping_document,
-                                 extract_checkbox_rows)
+from app.core.pdf_fields import build_audit_mapping_document, extract_checkbox_rows
 
 
 def _serialize_field(field):
@@ -35,7 +34,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--config",
-        default="app/core/config_example.yaml",
+        default="app/core/odot_mapping.yaml",
         help="mapping YAML to augment when exporting checkbox targets",
     )
     return parser.parse_args(argv)
@@ -51,6 +50,7 @@ def _write_export_document(output_path: str, document: dict) -> None:
     target_path.parent.mkdir(parents=True, exist_ok=True)
     target_path.write_text(rendered, encoding="utf-8")
     print(f"Wrote audited mapping to {target_path}")
+
 
 def main():
     args = _parse_args(sys.argv[1:])
@@ -82,8 +82,12 @@ def main():
         if args.details:
             out = {k: _serialize_field(v) for k, v in fields.items()}
         else:
-            out = {k: getattr(v, "value", None) if hasattr(v, "value") else None for k, v in fields.items()}
+            out = {
+                k: getattr(v, "value", None) if hasattr(v, "value") else None
+                for k, v in fields.items()
+            }
     print(json.dumps(out, indent=2))
+
 
 if __name__ == "__main__":
     main()

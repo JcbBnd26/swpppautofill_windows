@@ -13,7 +13,7 @@ a = Analysis(
     binaries=[],
     datas=[
         (str(root / "assets" / "template.pdf"), "assets"),
-        (str(root / "app" / "core" / "config_example.yaml"), "app/core"),
+        (str(root / "app" / "core" / "odot_mapping.yaml"), "app/core"),
     ],
     hiddenimports=[
         "app",

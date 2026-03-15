@@ -17,6 +17,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -35,6 +36,8 @@ MESONET_API_BASE = "https://api.prod.mesonet.org/index.php"
 MDF_EXPORT_URL = f"{MESONET_API_BASE}/export/mesonet_data_files"
 
 REQUEST_TIMEOUT = 30  # seconds per HTTP request
+_RETRY_DELAY = 2  # seconds between retries
+_MAX_RETRIES = 1  # number of retries on transient HTTP errors
 
 # Maximum parallel requests – polite but fast
 MAX_WORKERS = 8
@@ -115,8 +118,19 @@ def _fetch_rain_mm_at(station: str, utc_day: date, utc_time: str) -> float | Non
         "type": "mdf",
         "format": "csv",
     }
-    resp = requests.get(MDF_EXPORT_URL, params=params, timeout=REQUEST_TIMEOUT)
-    resp.raise_for_status()
+    last_exc: requests.RequestException | None = None
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            resp = requests.get(MDF_EXPORT_URL, params=params, timeout=REQUEST_TIMEOUT)
+            resp.raise_for_status()
+            break
+        except requests.RequestException as exc:
+            last_exc = exc
+            if attempt < _MAX_RETRIES:
+                log.debug("Retry %d for %s %s: %s", attempt + 1, utc_day, utc_time, exc)
+                time.sleep(_RETRY_DELAY)
+    else:
+        raise last_exc  # type: ignore[misc]
 
     reader = csv.DictReader(io.StringIO(resp.text))
     target = station.upper()

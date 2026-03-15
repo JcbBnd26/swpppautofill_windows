@@ -126,11 +126,6 @@ class RunOptions(BaseModel):
     end_date: str
     date_format: str = "%m/%d/%Y"
     make_zip: bool = True
-    debug: bool = False
-    verbose: bool = False
-    ocr_enabled: bool = True
-    output_format: str = "json"
-    save_intermediate: bool = False
 
 
 class ProjectInfo(BaseModel):

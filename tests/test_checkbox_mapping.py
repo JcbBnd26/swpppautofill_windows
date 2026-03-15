@@ -13,7 +13,7 @@ from app.core.pdf_fields import (
 
 TEMPLATE = Path(__file__).resolve().parents[1] / "assets" / "template.pdf"
 MAPPING_FILE = (
-    Path(__file__).resolve().parents[1] / "app" / "core" / "config_example.yaml"
+    Path(__file__).resolve().parents[1] / "app" / "core" / "odot_mapping.yaml"
 )
 
 

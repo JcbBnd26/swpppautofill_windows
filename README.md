@@ -48,7 +48,7 @@ Run:
 swppp-gui
 ```
 
-The GUI reads its field definitions from `app/core/config_example.yaml`, prompts for the date range and project details, and writes one PDF per inspection date plus an optional ZIP bundle.
+The GUI reads its field definitions from `app/core/odot_mapping.yaml`, prompts for the date range and project details, and writes one PDF per inspection date plus an optional ZIP bundle.
 
 ## Template inspection
 
@@ -84,7 +84,7 @@ swppp-inspect assets/template.pdf --config .\my-mapping.yaml --export-checkbox-m
 
 ## Configuration
 
-The YAML mapping lives in `app/core/config_example.yaml`.
+The YAML mapping lives in `app/core/odot_mapping.yaml`.
 
 - `fields` maps your project model keys to visible labels and PDF field names.
 - `date_fields` controls which PDF date fields are populated and how they are formatted.
@@ -111,6 +111,6 @@ The current test suite covers:
 ## Troubleshooting
 
 - If `pypdf` cannot read the template, verify that `assets/template.pdf` is the real form and not a placeholder file.
-- If generation fails with missing mapped form fields, run `swppp-inspect assets/template.pdf --details` and compare the reported field names to `app/core/config_example.yaml`.
+- If generation fails with missing mapped form fields, run `swppp-inspect assets/template.pdf --details` and compare the reported field names to `app/core/odot_mapping.yaml`.
 - If checklist behavior looks wrong, run `swppp-inspect assets/template.pdf --checkbox-rows` to inspect the inferred checkbox row ordering.
 - If you want to review the exact inferred checkbox targets, run `swppp-inspect assets/template.pdf --export-checkbox-mapping .\audit-mapping.yaml` and inspect the generated YAML.

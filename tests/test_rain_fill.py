@@ -7,13 +7,14 @@ from pathlib import Path
 
 import pytest
 
-from app.core.config_manager import (build_project_info, build_run_options,
-                                     load_mapping)
+from app.core.config_manager import build_project_info, build_run_options, load_mapping
 from app.core.mesonet import RainDay
 from app.core.rain_fill import generate_rain_batch
 
 TEMPLATE = Path(__file__).resolve().parents[1] / "assets" / "template.pdf"
-MAPPING_FILE = Path(__file__).resolve().parents[1] / "app" / "core" / "config_example.yaml"
+MAPPING_FILE = (
+    Path(__file__).resolve().parents[1] / "app" / "core" / "odot_mapping.yaml"
+)
 
 
 @pytest.fixture
@@ -23,13 +24,15 @@ def mapping():
 
 @pytest.fixture
 def project():
-    return build_project_info({
-        "job_piece": "JP-001",
-        "project_number": "PN-999",
-        "contract_id": "C-123",
-        "location_description_1": "Highway 66 Bridge",
-        "inspection_type": "Weekly Walkthrough",
-    })
+    return build_project_info(
+        {
+            "job_piece": "JP-001",
+            "project_number": "PN-999",
+            "contract_id": "C-123",
+            "location_description_1": "Highway 66 Bridge",
+            "inspection_type": "Weekly Walkthrough",
+        }
+    )
 
 
 @pytest.fixture

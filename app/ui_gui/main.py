@@ -8,7 +8,7 @@
 #    - Generate a batch of PDFs + JSON sidecars for each date
 #
 #  WIRING:
-#    - Loads mapping from app/core/config_example.yaml as TemplateMap
+#    - Loads mapping from app/core/odot_mapping.yaml as TemplateMap
 #    - Builds ProjectInfo from text fields
 #    - Builds checkbox_states dict from GUI toggles
 #    - Calls generate_batch(...) from app.core.fill
@@ -17,12 +17,15 @@
 from __future__ import annotations
 
 import calendar as cal_mod
+import logging
+import os
 import random
 import sys
 import threading
 import tkinter as tk
 from datetime import date as date_cls
 from datetime import timedelta
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -59,7 +62,9 @@ def _bundle_path(relative: str) -> Path:
 
 DEFAULT_DATE_FORMAT = "%m/%d/%Y"
 DEFAULT_TEMPLATE = _bundle_path("assets/template.pdf")
-DEFAULT_MAPPING = _bundle_path("app/core/config_example.yaml")
+DEFAULT_MAPPING = _bundle_path("app/core/odot_mapping.yaml")
+
+_DEBUG_UI = bool(os.environ.get("SWPPP_DEBUG", ""))
 
 _LOREM_WORDS = (
     "lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod "
@@ -225,8 +230,12 @@ class ScrollableFrame(ttk.Frame):
         self.canvas.pack(side="left", fill="both", expand=True)
         self.scrollbar.pack(side="right", fill="y")
 
-        # Mouse wheel scrolling
-        self.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
+        # Mouse wheel scrolling — scoped to when cursor is over the canvas
+        self.canvas.bind(
+            "<Enter>",
+            lambda _: self.canvas.bind_all("<MouseWheel>", self._on_mousewheel),
+        )
+        self.canvas.bind("<Leave>", lambda _: self.canvas.unbind_all("<MouseWheel>"))
 
     def _on_mousewheel(self, event):
         # Windows typically uses event.delta in multiples of 120
@@ -345,16 +354,17 @@ class App(tk.Tk):
         ttk.Label(proj_header, text="Project Info", font=("Segoe UI", 10, "bold")).pack(
             side="left"
         )
-        tk.Button(
-            proj_header,
-            text="T",
-            width=2,
-            height=1,
-            font=("Segoe UI", 7, "bold"),
-            relief="raised",
-            bg="#f0f0f0",
-            command=self._fill_test_fields,
-        ).pack(side="right", padx=(2, 0))
+        if _DEBUG_UI:
+            tk.Button(
+                proj_header,
+                text="T",
+                width=2,
+                height=1,
+                font=("Segoe UI", 7, "bold"),
+                relief="raised",
+                bg="#f0f0f0",
+                command=self._fill_test_fields,
+            ).pack(side="right", padx=(2, 0))
         lr += 1
 
         self.fields_inner = ttk.Frame(left, borderwidth=1, relief="groove")
@@ -545,26 +555,27 @@ class App(tk.Tk):
         ttk.Label(chk_header, text="Checklist", font=("Segoe UI", 10, "bold")).pack(
             side="left"
         )
-        tk.Button(
-            chk_header,
-            text="N",
-            width=2,
-            height=1,
-            font=("Segoe UI", 7, "bold"),
-            relief="raised",
-            bg="#f0f0f0",
-            command=self._fill_test_notes,
-        ).pack(side="right", padx=(2, 0))
-        tk.Button(
-            chk_header,
-            text="T",
-            width=2,
-            height=1,
-            font=("Segoe UI", 7, "bold"),
-            relief="raised",
-            bg="#f0f0f0",
-            command=self._fill_test_checklist,
-        ).pack(side="right", padx=(2, 0))
+        if _DEBUG_UI:
+            tk.Button(
+                chk_header,
+                text="N",
+                width=2,
+                height=1,
+                font=("Segoe UI", 7, "bold"),
+                relief="raised",
+                bg="#f0f0f0",
+                command=self._fill_test_notes,
+            ).pack(side="right", padx=(2, 0))
+            tk.Button(
+                chk_header,
+                text="T",
+                width=2,
+                height=1,
+                font=("Segoe UI", 7, "bold"),
+                relief="raised",
+                bg="#f0f0f0",
+                command=self._fill_test_checklist,
+            ).pack(side="right", padx=(2, 0))
         checks_border = ttk.Frame(right, borderwidth=1, relief="groove")
         checks_border.grid(row=1, column=0, sticky="nsew", padx=0, pady=(0, 10))
         checks_border.columnconfigure(0, weight=1)
@@ -624,6 +635,12 @@ class App(tk.Tk):
             var.trace_add("write", self._on_generator_inputs_changed)
 
     def _on_generator_inputs_changed(self, *_args):
+        if self._rain_data_ready:
+            if not messagebox.askyesno(
+                "Re-fetch Needed",
+                "Changing the date range will clear fetched rain data. Continue?",
+            ):
+                return
         self._invalidate_rain_data()
 
     def _set_month_selection_state(self, state: str):
@@ -684,6 +701,14 @@ class App(tk.Tk):
             last_month = checked[-1]
             start = date_cls(year, first_month, 1)
             end = date_cls(year, last_month, cal_mod.monthrange(year, last_month)[1])
+            # Warn about gaps in month selection
+            if len(checked) != (last_month - first_month + 1):
+                gap_note = (
+                    f"Note: generating for "
+                    f"{cal_mod.month_abbr[first_month]}–{cal_mod.month_abbr[last_month]} "
+                    f"inclusive (all months in range)."
+                )
+                self.rain_status.set(gap_note)
 
         if start <= today <= end:
             end = today
@@ -806,7 +831,7 @@ class App(tk.Tk):
         except ValueError as exc:
             self._rain_data_ready = False
             self._update_generate_button_state()
-            self.rain_status.set(f"Error: {exc}")
+            messagebox.showerror("Input Error", str(exc))
             return
 
         self.rain_status.set("Fetching rainfall data from Mesonet...")
@@ -1128,7 +1153,18 @@ class App(tk.Tk):
 # ============================================================
 
 
+def _setup_logging() -> None:
+    log_path = Path.home() / "swppp_autofill.log"
+    handler = RotatingFileHandler(log_path, maxBytes=1_048_576, backupCount=2)
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s")
+    )
+    logging.getLogger().addHandler(handler)
+    logging.getLogger().setLevel(logging.DEBUG)
+
+
 def main():
+    _setup_logging()
     app = App()
     app.mainloop()
 

@@ -1,3 +1,6 @@
+Set FSO = CreateObject("Scripting.FileSystemObject")
+strDir = FSO.GetParentFolderName(WScript.ScriptFullName)
+
 Set WshShell = CreateObject("WScript.Shell")
-WshShell.CurrentDirectory = "C:\Projects\swpppautofill_windows"
-WshShell.Run """C:\Projects\swpppautofill_windows\.venv\Scripts\pythonw.exe"" ""C:\Projects\swpppautofill_windows\launch_gui.pyw""", 0, False
+WshShell.CurrentDirectory = strDir
+WshShell.Run """" & strDir & "\.venv\Scripts\pythonw.exe"" """ & strDir & "\launch_gui.pyw""", 0, False

@@ -1,9 +1,13 @@
 import json
+import logging
 from datetime import date as date_cls
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
 
 import typer
+import yaml
+from pydantic import ValidationError
 
 from app.core.config_manager import (
     build_project_info,
@@ -18,6 +22,21 @@ from app.core.mesonet_stations import STATIONS
 from app.core.rain_fill import generate_rain_batch
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
+
+
+def _setup_logging() -> None:
+    log_path = Path.home() / "swppp_autofill.log"
+    handler = RotatingFileHandler(log_path, maxBytes=1_048_576, backupCount=2)
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s")
+    )
+    logging.getLogger().addHandler(handler)
+    logging.getLogger().setLevel(logging.DEBUG)
+
+
+@app.callback(invoke_without_command=True)
+def _init(ctx: typer.Context) -> None:
+    _setup_logging()
 
 
 @app.command("run")
@@ -46,14 +65,31 @@ def run(
     ),
 ):
     if config is None:
-        config = Path(__file__).parent.parent / "core" / "config_example.yaml"
-    mapping = load_mapping(config)
+        config = Path(__file__).parent.parent / "core" / "odot_mapping.yaml"
+    try:
+        mapping = load_mapping(config)
+    except (FileNotFoundError, yaml.YAMLError, ValidationError) as exc:
+        typer.echo(f"Error loading config '{config}': {exc}", err=True)
+        raise typer.Exit(1) from exc
 
     data = {}
     if project_file:
-        project = load_project_info(project_file)
+        try:
+            project = load_project_info(project_file)
+        except (
+            FileNotFoundError,
+            json.JSONDecodeError,
+            yaml.YAMLError,
+            ValidationError,
+        ) as exc:
+            typer.echo(f"Error loading project file '{project_file}': {exc}", err=True)
+            raise typer.Exit(1) from exc
     elif project_json:
-        data = json.loads(project_json)
+        try:
+            data = json.loads(project_json)
+        except json.JSONDecodeError as exc:
+            typer.echo(f"Invalid JSON for --project-json: {exc}", err=True)
+            raise typer.Exit(1) from exc
         project = build_project_info(data)
     else:
         typer.echo("Enter project info (press Enter to keep blank):")
@@ -93,7 +129,11 @@ def run(
 
         if rain_csv:
             typer.echo(f"\nLoading rain data from {rain_csv} ...")
-            all_days = parse_rainfall_csv_file(rain_csv)
+            try:
+                all_days = parse_rainfall_csv_file(rain_csv)
+            except FileNotFoundError as exc:
+                typer.echo(f"Error: {exc}", err=True)
+                raise typer.Exit(1) from exc
         else:
             code = station.upper()
             if code not in STATIONS:
@@ -101,8 +141,12 @@ def run(
                     f"Warning: '{code}' is not a known Mesonet station code.",
                     err=True,
                 )
-            s = date_cls.fromisoformat(start_date)
-            e = date_cls.fromisoformat(end_date)
+            try:
+                s = date_cls.fromisoformat(start_date)
+                e = date_cls.fromisoformat(end_date)
+            except ValueError as exc:
+                typer.echo(f"Invalid date format: {exc}", err=True)
+                raise typer.Exit(1) from exc
             typer.echo(f"\nFetching rain data for {code} ({s} to {e}) ...")
             result = fetch_rainfall(code, s, e)
             all_days = result.days

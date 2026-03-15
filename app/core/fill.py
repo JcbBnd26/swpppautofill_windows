@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import logging
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -27,6 +28,8 @@ from pypdf import PdfReader, PdfWriter
 
 from app.core.model import ProjectInfo, RunOptions, TemplateMap
 from app.core.pdf_fields import populate_checkbox_targets
+
+log = logging.getLogger(__name__)
 
 # ============================================================
 #  Small Helpers
@@ -215,7 +218,11 @@ def generate_batch(
             checkbox_states=checks,
             notes_texts=notes_texts,
         )
-        _write_filled_pdf(template, pdf_out, field_updates)
+        try:
+            _write_filled_pdf(template, pdf_out, field_updates)
+        except OSError as exc:
+            log.error("Failed to write %s: %s", pdf_out, exc)
+            continue
         created.append(str(pdf_out))
 
     # --------------------------------------------------------
@@ -223,11 +230,14 @@ def generate_batch(
     # --------------------------------------------------------
     if getattr(options, "make_zip", False):
         zip_path = outdir / "swppp_outputs.zip"
-        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            for path_str in created:
-                p = Path(path_str)
-                # store relative to output dir so ZIP is clean
-                zf.write(p, arcname=p.name)
-        created.append(str(zip_path))
+        try:
+            with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                for path_str in created:
+                    p = Path(path_str)
+                    # store relative to output dir so ZIP is clean
+                    zf.write(p, arcname=p.name)
+            created.append(str(zip_path))
+        except OSError as exc:
+            log.error("Failed to create ZIP %s: %s", zip_path, exc)
 
     return created
