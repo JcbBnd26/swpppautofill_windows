@@ -1,30 +1,14 @@
-# ============================================================
-#  SWPPP AutoFill – Core Fill Logic
-#
-#  CURRENT BEHAVIOR (V1):
-#    - Makes one PDF copy of the template per inspection date.
-#    - Names them like: inspection_01_20250101.pdf
-#    - Optionally bundles them into swppp_outputs.zip
-#
-#  FUTURE BEHAVIOR (V2+):
-#    - Actually writes project fields and YES/NO/N/A selections
-#      into the PDF (checkmarks, text, etc.) using a PDF library.
-#
-#  NOTE:
-#    Right now this is focused on getting a stable pipeline:
-#      GUI -> generate_batch(...) -> real files on disk.
-#    So the PDFs are still visually blank copies of template.pdf.
-# ============================================================
-
 from __future__ import annotations
 
 import logging
+import re
 import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from pypdf import PdfReader, PdfWriter
+from pypdf.generic import BooleanObject, NameObject, TextStringObject
 
 from app.core.model import ProjectInfo, RunOptions, TemplateMap
 from app.core.pdf_fields import populate_checkbox_targets
@@ -136,9 +120,41 @@ def _write_filled_pdf(
     writer.clone_document_from_reader(reader)
     for page in writer.pages:
         writer.update_page_form_field_values(page, field_updates, auto_regenerate=False)
+    _set_text_font_size(writer, size=10)
+
+    # Tell the viewer to regenerate appearance streams using our /DA values.
+    if "/AcroForm" in writer._root_object:
+        writer._root_object["/AcroForm"][NameObject("/NeedAppearances")] = (
+            BooleanObject(True)
+        )
 
     with pdf_out.open("wb") as stream:
         writer.write(stream)
+
+
+_DA_SIZE_RE = re.compile(r"(/\w+\s+)\d+(?:\.\d+)?(\s+Tf)")
+
+
+def _set_text_font_size(writer: PdfWriter, size: int) -> None:
+    """Override the font size in the /DA string of every text-field annotation
+    and remove cached appearance streams so the viewer rebuilds them at the
+    new size."""
+    for page in writer.pages:
+        annots = page.get("/Annots")
+        if not annots:
+            continue
+        for ref in annots:
+            annot = ref.get_object()
+            if str(annot.get("/FT")) != "/Tx":
+                continue
+            da = annot.get("/DA")
+            if not da:
+                continue
+            new_da = _DA_SIZE_RE.sub(rf"\g<1>{size}\2", str(da))
+            annot[NameObject("/DA")] = TextStringObject(new_da)
+            # Remove cached appearance so the viewer rebuilds it with the new /DA
+            if "/AP" in annot:
+                del annot["/AP"]
 
 
 # ============================================================
@@ -229,15 +245,28 @@ def generate_batch(
     #  Optional ZIP bundle of all created PDFs
     # --------------------------------------------------------
     if getattr(options, "make_zip", False):
-        zip_path = outdir / "swppp_outputs.zip"
-        try:
-            with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-                for path_str in created:
-                    p = Path(path_str)
-                    # store relative to output dir so ZIP is clean
-                    zf.write(p, arcname=p.name)
-            created.append(str(zip_path))
-        except OSError as exc:
-            log.error("Failed to create ZIP %s: %s", zip_path, exc)
+        created = bundle_outputs_zip(created, outdir)
 
     return created
+
+
+def bundle_outputs_zip(
+    paths: list[str], outdir: Path, zip_name: str = "swppp_outputs.zip"
+) -> list[str]:
+    """Bundle all PDF *paths* into a single ZIP inside *outdir*.
+
+    Returns a new list with the ZIP path appended.
+    """
+    pdf_paths = [p for p in paths if p.lower().endswith(".pdf")]
+    if not pdf_paths:
+        return list(paths)
+    zip_path = outdir / zip_name
+    try:
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for path_str in pdf_paths:
+                p = Path(path_str)
+                zf.write(p, arcname=p.name)
+        return list(paths) + [str(zip_path)]
+    except OSError as exc:
+        log.error("Failed to create ZIP %s: %s", zip_path, exc)
+        return list(paths)

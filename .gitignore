@@ -7,9 +7,13 @@ build/
 __pycache__/
 *.py[cod]
 *.egg-info/
+.pytest_cache/
 
 # Virtual environment
 .venv/
 
 # Output
 tmp_output/
+
+# Vestigial docs
+misc_docs/
