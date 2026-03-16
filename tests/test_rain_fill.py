@@ -156,12 +156,15 @@ class TestGenerateRainBatch:
 
     @pytest.mark.skipif(not TEMPLATE.exists(), reason="template.pdf not present")
     def test_zip_bundle_created(self, mapping, project, rain_days, tmp_path):
+        """bundle_outputs_zip combines PDFs into a single ZIP."""
+        from app.core.fill import bundle_outputs_zip
+
         opts = build_run_options(
             output_dir=str(tmp_path),
             start_date="2025-04-01",
             end_date="2025-04-30",
             date_format="%m/%d/%Y",
-            make_zip=True,
+            make_zip=False,
         )
         written = generate_rain_batch(
             template_path=str(TEMPLATE),
@@ -171,6 +174,7 @@ class TestGenerateRainBatch:
             mapping=mapping,
             original_inspection_type="Weekly",
         )
+        written = bundle_outputs_zip(written, tmp_path)
         zips = [p for p in written if p.endswith(".zip")]
         assert len(zips) == 1
-        assert "rain_events.zip" in zips[0]
+        assert "swppp_outputs.zip" in zips[0]

@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import logging
-import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -95,17 +94,5 @@ def generate_rain_batch(
             log.error("Failed to write %s: %s", pdf_out, exc)
             continue
         created.append(str(pdf_out))
-
-    # Optional ZIP bundle
-    if getattr(options, "make_zip", False) and created:
-        zip_path = outdir / "rain_events.zip"
-        try:
-            with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-                for path_str in created:
-                    p = Path(path_str)
-                    zf.write(p, arcname=p.name)
-            created.append(str(zip_path))
-        except OSError as exc:
-            log.error("Failed to create ZIP %s: %s", zip_path, exc)
 
     return created

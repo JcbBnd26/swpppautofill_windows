@@ -34,7 +34,7 @@ from tkcalendar import Calendar
 
 from app.core.config_manager import build_project_info, build_run_options, load_mapping
 from app.core.dates import weekly_dates
-from app.core.fill import generate_batch
+from app.core.fill import bundle_outputs_zip, generate_batch
 from app.core.mesonet import (
     FetchResult,
     RainDay,
@@ -45,6 +45,13 @@ from app.core.mesonet import (
 from app.core.mesonet_stations import parse_station_code, station_display_list
 from app.core.model import TemplateMap
 from app.core.rain_fill import generate_rain_batch
+from app.core.session import (
+    delete_session,
+    list_sessions,
+    load_named_session,
+    save_named_session,
+    save_session,
+)
 
 # ============================================================
 #  Helper: bundled path (for PyInstaller, etc.)
@@ -224,11 +231,19 @@ class ScrollableFrame(ttk.Frame):
             lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")),
         )
 
-        self.canvas.create_window((0, 0), window=self.inner, anchor="nw")
+        self._window_id = self.canvas.create_window(
+            (0, 0), window=self.inner, anchor="nw"
+        )
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
 
         self.canvas.pack(side="left", fill="both", expand=True)
         self.scrollbar.pack(side="right", fill="y")
+
+        # Keep inner frame width in sync with the canvas
+        self.canvas.bind(
+            "<Configure>",
+            lambda e: self.canvas.itemconfigure(self._window_id, width=e.width),
+        )
 
         # Mouse wheel scrolling — scoped to when cursor is over the canvas
         self.canvas.bind(
@@ -261,8 +276,16 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
 
+        # Hide window while building UI to prevent ugly resize flash
+        self.withdraw()
+
         self.title("SWPPP AutoFill")
         self.minsize(1100, 700)
+
+        # Set app icon
+        _icon = _bundle_path("assets/app_icon.ico")
+        if _icon.exists():
+            self.iconbitmap(default=str(_icon))
 
         # --- STATE VARIABLES ---
         self.start_date = tk.StringVar()
@@ -299,6 +322,10 @@ class App(tk.Tk):
         self._rain_days: list[RainDay] = []
         self._rain_data_ready = False
 
+        # Guard flag — suppresses the generator-input trace callback
+        # during programmatic variable changes (restore-on-cancel, init, etc.)
+        self._suppress_input_traces = False
+
         # Build UI and load YAML
         self._build_ui()
         self._bind_generator_input_traces()
@@ -308,6 +335,9 @@ class App(tk.Tk):
 
         # Size window to fit content (capped to screen)
         self._fit_to_content()
+
+        # Show the fully-built window
+        self.deiconify()
 
         # Warn if template is missing
         if not DEFAULT_TEMPLATE.exists():
@@ -321,8 +351,11 @@ class App(tk.Tk):
     #  UI Construction
     # --------------------------------------------------------
     def _build_ui(self):
+        self._build_menu_bar()
+
         pad = {"padx": 10, "pady": 6}
         root = ttk.Frame(self)
+        self._root_frame = root
         root.grid(row=0, column=0, sticky="nsew")
 
         # ---- Header (spans full width) ----
@@ -354,17 +387,18 @@ class App(tk.Tk):
         ttk.Label(proj_header, text="Project Info", font=("Segoe UI", 10, "bold")).pack(
             side="left"
         )
+        self._debug_btn_fields = tk.Button(
+            proj_header,
+            text="T",
+            width=2,
+            height=1,
+            font=("Segoe UI", 7, "bold"),
+            relief="raised",
+            bg="#f0f0f0",
+            command=self._fill_test_fields,
+        )
         if _DEBUG_UI:
-            tk.Button(
-                proj_header,
-                text="T",
-                width=2,
-                height=1,
-                font=("Segoe UI", 7, "bold"),
-                relief="raised",
-                bg="#f0f0f0",
-                command=self._fill_test_fields,
-            ).pack(side="right", padx=(2, 0))
+            self._debug_btn_fields.pack(side="right", padx=(2, 0))
         lr += 1
 
         self.fields_inner = ttk.Frame(left, borderwidth=1, relief="groove")
@@ -536,6 +570,16 @@ class App(tk.Tk):
             width=18,
         )
         self._generate_btn.grid(row=sr, column=0, columnspan=2, pady=(8, 0))
+        sr += 1
+
+        self._gen_progress = ttk.Progressbar(
+            settings_frame,
+            orient="horizontal",
+            mode="indeterminate",
+            length=200,
+        )
+        self._gen_progress.grid(row=sr, column=0, columnspan=2, pady=(4, 0))
+        self._gen_progress.grid_remove()
 
         ttk.Separator(left).grid(
             row=lr, column=0, columnspan=2, sticky="ew", pady=(8, 8)
@@ -555,27 +599,29 @@ class App(tk.Tk):
         ttk.Label(chk_header, text="Checklist", font=("Segoe UI", 10, "bold")).pack(
             side="left"
         )
+        self._debug_btn_notes = tk.Button(
+            chk_header,
+            text="N",
+            width=2,
+            height=1,
+            font=("Segoe UI", 7, "bold"),
+            relief="raised",
+            bg="#f0f0f0",
+            command=self._fill_test_notes,
+        )
+        self._debug_btn_checks = tk.Button(
+            chk_header,
+            text="T",
+            width=2,
+            height=1,
+            font=("Segoe UI", 7, "bold"),
+            relief="raised",
+            bg="#f0f0f0",
+            command=self._fill_test_checklist,
+        )
         if _DEBUG_UI:
-            tk.Button(
-                chk_header,
-                text="N",
-                width=2,
-                height=1,
-                font=("Segoe UI", 7, "bold"),
-                relief="raised",
-                bg="#f0f0f0",
-                command=self._fill_test_notes,
-            ).pack(side="right", padx=(2, 0))
-            tk.Button(
-                chk_header,
-                text="T",
-                width=2,
-                height=1,
-                font=("Segoe UI", 7, "bold"),
-                relief="raised",
-                bg="#f0f0f0",
-                command=self._fill_test_checklist,
-            ).pack(side="right", padx=(2, 0))
+            self._debug_btn_notes.pack(side="right", padx=(2, 0))
+            self._debug_btn_checks.pack(side="right", padx=(2, 0))
         checks_border = ttk.Frame(right, borderwidth=1, relief="groove")
         checks_border.grid(row=1, column=0, sticky="nsew", padx=0, pady=(0, 10))
         checks_border.columnconfigure(0, weight=1)
@@ -586,7 +632,7 @@ class App(tk.Tk):
     def _configure_grid(self):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
-        root = self.children[list(self.children.keys())[0]]
+        root = self._root_frame
         root.columnconfigure(0, weight=0, minsize=350)  # left column (fixed width)
         root.columnconfigure(
             1, weight=1, minsize=500
@@ -596,6 +642,8 @@ class App(tk.Tk):
     def _fit_to_content(self):
         """Size the window to fit all content, capped to 95% of screen."""
         self.update_idletasks()
+        # Allow the OS menu bar to be realized before measuring
+        self.update()
         req_w = self.winfo_reqwidth()
         req_h = self.winfo_reqheight()
         scr_w = self.winfo_screenwidth()
@@ -610,14 +658,18 @@ class App(tk.Tk):
     #  Custom date toggle helpers
     # --------------------------------------------------------
     def _toggle_custom_dates(self):
-        if self._custom_dates_enabled.get():
-            self._custom_dates_frame.grid()
-            self._set_month_selection_state("disabled")
-        else:
-            self._custom_dates_frame.grid_remove()
-            self._set_month_selection_state("normal")
-            self.start_date.set("")
-            self.end_date.set("")
+        self._suppress_input_traces = True
+        try:
+            if self._custom_dates_enabled.get():
+                self._custom_dates_frame.grid()
+                self._set_month_selection_state("disabled")
+            else:
+                self._custom_dates_frame.grid_remove()
+                self._set_month_selection_state("normal")
+                self.start_date.set("")
+                self.end_date.set("")
+        finally:
+            self._suppress_input_traces = False
         self._invalidate_rain_data()
 
     def _toggle_rain_section(self):
@@ -634,12 +686,39 @@ class App(tk.Tk):
         for var in self._month_vars:
             var.trace_add("write", self._on_generator_inputs_changed)
 
+    def _snapshot_inputs(self):
+        """Capture current generator-input state for undo on cancel."""
+        self._input_snapshot = {
+            "year": self._quick_year.get(),
+            "months": [v.get() for v in self._month_vars],
+            "start": self.start_date.get(),
+            "end": self.end_date.get(),
+        }
+
+    def _restore_input_snapshot(self):
+        """Restore generator inputs from the last snapshot (suppresses traces)."""
+        snap = getattr(self, "_input_snapshot", None)
+        if not snap:
+            return
+        self._suppress_input_traces = True
+        try:
+            self._quick_year.set(snap["year"])
+            for var, val in zip(self._month_vars, snap["months"]):
+                var.set(val)
+            self.start_date.set(snap["start"])
+            self.end_date.set(snap["end"])
+        finally:
+            self._suppress_input_traces = False
+
     def _on_generator_inputs_changed(self, *_args):
+        if self._suppress_input_traces:
+            return
         if self._rain_data_ready:
             if not messagebox.askyesno(
                 "Re-fetch Needed",
                 "Changing the date range will clear fetched rain data. Continue?",
             ):
+                self._restore_input_snapshot()
                 return
         self._invalidate_rain_data()
 
@@ -704,11 +783,12 @@ class App(tk.Tk):
             # Warn about gaps in month selection
             if len(checked) != (last_month - first_month + 1):
                 gap_note = (
-                    f"Note: generating for "
-                    f"{cal_mod.month_abbr[first_month]}–{cal_mod.month_abbr[last_month]} "
-                    f"inclusive (all months in range)."
+                    f"Non-contiguous months selected.  The date range will "
+                    f"cover {cal_mod.month_abbr[first_month]}–"
+                    f"{cal_mod.month_abbr[last_month]} inclusive "
+                    f"(all months in the span, not just the checked ones)."
                 )
-                self.rain_status.set(gap_note)
+                messagebox.showwarning("Non-Contiguous Months", gap_note)
 
         if start <= today <= end:
             end = today
@@ -732,6 +812,7 @@ class App(tk.Tk):
     # --------------------------------------------------------
     def _on_generate_months(self):
         """Generate weekly + rain PDFs for the checked months."""
+        # --- Validation & input gathering (must stay on main thread) ---
         try:
             checked = self._get_selected_months()
             year = int(self._quick_year.get())
@@ -768,36 +849,56 @@ class App(tk.Tk):
                 start_date=iso_start,
                 end_date=iso_end,
                 date_format=DEFAULT_DATE_FORMAT,
-                make_zip=True,
+                make_zip=False,
             )
 
-            dates = list(weekly_dates(options.start_date, options.end_date))
-            written = generate_batch(
-                template_path=str(template),
-                project=project,
-                options=options,
-                dates=dates,
-                mapping=mapping,
-                checkbox_states=check_states,
-                notes_texts=notes_texts,
-            )
-
-            # Rain event PDFs for loaded rain days within checked months
+            rain_days_for_gen: list = []
+            original_type = ""
             if self._rain_enabled.get() and self._rain_data_ready and self._rain_days:
-                month_rain = [
+                rain_days_for_gen = [
                     rd for rd in self._rain_days if start_date <= rd.date <= end_date
                 ]
-                if month_rain:
-                    original_type = (
-                        self.project_entries.get("inspection_type", tk.StringVar())
-                        .get()
-                        .strip()
-                    )
+                original_type = (
+                    self.project_entries.get("inspection_type", tk.StringVar())
+                    .get()
+                    .strip()
+                )
+
+        except ValueError as exc:
+            messagebox.showerror("Input Error", str(exc))
+            return
+        except Exception as exc:
+            messagebox.showerror(
+                "Generation Failed",
+                f"The PDF batch could not be generated.\n\n{exc}",
+            )
+            return
+
+        # --- Show progress, disable button, run work on background thread ---
+        self._generate_btn.config(state="disabled")
+        self._gen_progress.grid()
+        self._gen_progress.start(15)
+        session_dict = self._build_session_dict()
+
+        def _worker():
+            try:
+                dates = list(weekly_dates(options.start_date, options.end_date))
+                written = generate_batch(
+                    template_path=str(template),
+                    project=project,
+                    options=options,
+                    dates=dates,
+                    mapping=mapping,
+                    checkbox_states=check_states,
+                    notes_texts=notes_texts,
+                )
+
+                if rain_days_for_gen:
                     rain_written = generate_rain_batch(
                         template_path=str(template),
                         project=project,
                         options=options,
-                        rain_days=month_rain,
+                        rain_days=rain_days_for_gen,
                         mapping=mapping,
                         checkbox_states=check_states,
                         notes_texts=notes_texts,
@@ -805,17 +906,35 @@ class App(tk.Tk):
                     )
                     written.extend(rain_written)
 
-            messagebox.showinfo(
-                "Generation Complete", self._build_success_message(written)
-            )
+                written = bundle_outputs_zip(written, outdir)
+                self.after(0, lambda: self._on_generate_done(written, session_dict))
+            except Exception as exc:
+                self.after(0, lambda e=exc: self._on_generate_error(e))
 
-        except ValueError as exc:
-            messagebox.showerror("Input Error", str(exc))
-        except Exception as exc:
-            messagebox.showerror(
-                "Generation Failed",
-                f"The PDF batch could not be generated.\n\n{exc}",
-            )
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_generate_done(self, written: list[str], session_dict: dict) -> None:
+        """Called on the main thread when PDF generation finishes."""
+        self._gen_progress.stop()
+        self._gen_progress.grid_remove()
+        self._update_generate_button_state()
+
+        messagebox.showinfo("Generation Complete", self._build_success_message(written))
+        try:
+            save_session(session_dict)
+        except Exception:
+            log.exception("Failed to save session after generate")
+
+    def _on_generate_error(self, exc: Exception) -> None:
+        """Called on the main thread when PDF generation fails."""
+        self._gen_progress.stop()
+        self._gen_progress.grid_remove()
+        self._update_generate_button_state()
+
+        messagebox.showerror(
+            "Generation Failed",
+            f"The PDF batch could not be generated.\n\n{exc}",
+        )
 
     # --------------------------------------------------------
     #  Rain Days handlers
@@ -880,6 +999,7 @@ class App(tk.Tk):
         self._rain_progress.grid_remove()  # hide progress bar
         self._rain_days = events
         self._rain_data_ready = True
+        self._snapshot_inputs()
         self._update_generate_button_state()
         msg = (
             f"Found {len(events)} rain day(s) with 0.5+ inches "
@@ -913,6 +1033,7 @@ class App(tk.Tk):
             events = filter_rain_events(all_days)
             self._rain_days = events
             self._rain_data_ready = True
+            self._snapshot_inputs()
             self._update_generate_button_state()
             self.rain_status.set(
                 f"Loaded {len(all_days)} day(s) from file. "
@@ -966,6 +1087,7 @@ class App(tk.Tk):
 
         # --- Checklist (toggle buttons) ---
         cr = 0
+        self.checks_area.inner.columnconfigure(0, weight=1)
         mapping_checks = getattr(mapping, "checkboxes", None)
         if not mapping_checks:
             ttk.Label(
@@ -1096,9 +1218,16 @@ class App(tk.Tk):
         for group_key, group in self.checkbox_vars.items():
             for _label, var in group.items():
                 var.set(random.choice(["YES", "NO"]))
-        # Refresh toggle-button visuals
+        self._refresh_checkbox_visuals()
+
+    def _refresh_checkbox_visuals(self):
+        """Sync toggle-button relief/colour with the current checkbox_vars values."""
+        if self._current_mapping is None:
+            return
         for group_key in self.checkbox_vars:
-            mapping_group = self._current_mapping.checkboxes[group_key]
+            mapping_group = self._current_mapping.checkboxes.get(group_key)
+            if mapping_group is None:
+                continue
             pdf_list = getattr(mapping_group, "pdf_fields", []) or []
             parent = None
             for w in self.checks_area.inner.winfo_children():
@@ -1123,6 +1252,281 @@ class App(tk.Tk):
         for widget in self.notes_vars.values():
             widget.delete("1.0", "end")
             widget.insert("1.0", _random_lorem(random.randint(8, 20)))
+
+    # --------------------------------------------------------
+    #  Menu bar
+    # --------------------------------------------------------
+    def _build_menu_bar(self):
+        menubar = tk.Menu(self)
+        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(
+            label="Save Session As...",
+            accelerator="Ctrl+S",
+            command=self._on_save_session,
+        )
+        file_menu.add_command(
+            label="Load Session...",
+            accelerator="Ctrl+O",
+            command=self._on_load_session,
+        )
+        file_menu.add_command(
+            label="Delete Session...", command=self._on_delete_session
+        )
+        file_menu.add_separator()
+        file_menu.add_command(label="Clear Form", command=self._on_clear_form)
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit", command=self.destroy)
+        menubar.add_cascade(label="File", menu=file_menu)
+
+        # ---- Edit menu ----
+        edit_menu = tk.Menu(menubar, tearoff=0)
+        self._debug_visible = tk.BooleanVar(value=_DEBUG_UI)
+        edit_menu.add_checkbutton(
+            label="Show Test Fill Buttons",
+            variable=self._debug_visible,
+            command=self._toggle_debug_buttons,
+        )
+        menubar.add_cascade(label="Edit", menu=edit_menu)
+
+        self.config(menu=menubar)
+        self.bind_all("<Control-s>", lambda _e: self._on_save_session())
+        self.bind_all("<Control-o>", lambda _e: self._on_load_session())
+
+    def _toggle_debug_buttons(self):
+        if self._debug_visible.get():
+            self._debug_btn_fields.pack(side="right", padx=(2, 0))
+            self._debug_btn_notes.pack(side="right", padx=(2, 0))
+            self._debug_btn_checks.pack(side="right", padx=(2, 0))
+        else:
+            self._debug_btn_fields.pack_forget()
+            self._debug_btn_notes.pack_forget()
+            self._debug_btn_checks.pack_forget()
+
+    def _on_save_session(self):
+        from tkinter import simpledialog
+
+        name = simpledialog.askstring(
+            "Save Session",
+            "Enter a name for this session:\n"
+            '(e.g. "Highway 66 Bridge" or "I-35 Overpass")',
+            parent=self,
+        )
+        if not name or not name.strip():
+            return
+        name = name.strip()
+        try:
+            save_named_session(name, self._build_session_dict())
+            messagebox.showinfo(
+                "Session Saved", f'Session "{name}" saved successfully.'
+            )
+        except ValueError as exc:
+            messagebox.showerror("Invalid Name", str(exc))
+        except Exception:
+            log.exception("Failed to save session")
+            messagebox.showerror("Save Failed", "Could not save the session file.")
+
+    def _on_load_session(self):
+        names = list_sessions()
+        if not names:
+            messagebox.showinfo(
+                "No Sessions",
+                "No saved sessions found.\n\n"
+                "Use File \u2192 Save Session As... to save one.",
+            )
+            return
+        choice = self._pick_from_list(
+            "Load Session", "Select a session to load:", names
+        )
+        if choice is None:
+            return
+        data = load_named_session(choice)
+        if data is None:
+            messagebox.showerror("Load Failed", f'Could not read session "{choice}".')
+            return
+        self._restore_session(data)
+        messagebox.showinfo("Session Loaded", f'Session "{choice}" restored.')
+
+    def _on_delete_session(self):
+        names = list_sessions()
+        if not names:
+            messagebox.showinfo("No Sessions", "No saved sessions to delete.")
+            return
+        choice = self._pick_from_list(
+            "Delete Session", "Select a session to delete:", names
+        )
+        if choice is None:
+            return
+        if not messagebox.askyesno(
+            "Confirm Delete", f'Permanently delete session "{choice}"?'
+        ):
+            return
+        delete_session(choice)
+        messagebox.showinfo("Deleted", f'Session "{choice}" deleted.')
+
+    def _pick_from_list(self, title: str, prompt: str, items: list[str]) -> str | None:
+        """Show a modal dialog with a listbox and return the selected item."""
+        dialog = tk.Toplevel(self)
+        dialog.title(title)
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+
+        result: list[str | None] = [None]
+
+        ttk.Label(dialog, text=prompt).pack(padx=12, pady=(12, 4))
+        frame = ttk.Frame(dialog)
+        frame.pack(fill="both", expand=True, padx=12, pady=4)
+
+        listbox = tk.Listbox(frame, width=40, height=min(len(items), 15))
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=listbox.yview)
+        listbox.configure(yscrollcommand=scrollbar.set)
+        listbox.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        for item in items:
+            listbox.insert("end", item)
+        if items:
+            listbox.selection_set(0)
+
+        def _on_ok():
+            sel = listbox.curselection()
+            if sel:
+                result[0] = listbox.get(sel[0])
+            dialog.destroy()
+
+        def _on_double_click(_event):
+            _on_ok()
+
+        listbox.bind("<Double-1>", _on_double_click)
+
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(pady=(4, 12))
+        ttk.Button(btn_frame, text="OK", command=_on_ok).pack(side="left", padx=4)
+        ttk.Button(btn_frame, text="Cancel", command=dialog.destroy).pack(
+            side="left", padx=4
+        )
+
+        dialog.update_idletasks()
+        x = self.winfo_x() + (self.winfo_width() - dialog.winfo_reqwidth()) // 2
+        y = self.winfo_y() + (self.winfo_height() - dialog.winfo_reqheight()) // 2
+        dialog.geometry(f"+{x}+{y}")
+
+        self.wait_window(dialog)
+        return result[0]
+
+    def _on_clear_form(self):
+        if not messagebox.askyesno(
+            "Clear Form",
+            "Reset all fields, checkboxes, and notes to blank?\n\n"
+            "This cannot be undone.",
+        ):
+            return
+        self._suppress_input_traces = True
+        try:
+            # Project text fields
+            for var in self.project_entries.values():
+                var.set("")
+            # Checkboxes
+            for group in self.checkbox_vars.values():
+                for var in group.values():
+                    var.set("")
+            self._refresh_checkbox_visuals()
+            # Notes
+            for widget in self.notes_vars.values():
+                widget.delete("1.0", "end")
+            # Generator settings back to defaults
+            self._quick_year.set(str(date_cls.today().year))
+            current_month = date_cls.today().month
+            for i, var in enumerate(self._month_vars):
+                var.set(i == current_month - 1)
+            if self._custom_dates_enabled.get():
+                self._custom_dates_enabled.set(False)
+                self._custom_dates_frame.grid_remove()
+                self._set_month_selection_state("normal")
+            self.start_date.set("")
+            self.end_date.set("")
+            self._rain_enabled.set(True)
+            self._toggle_rain_section()
+            self.rain_station.set("")
+        finally:
+            self._suppress_input_traces = False
+        self._invalidate_rain_data()
+
+    # --------------------------------------------------------
+    #  Session persistence
+    # --------------------------------------------------------
+    def _build_session_dict(self) -> dict:
+        """Assemble a dict of current form state for session save."""
+        return {
+            "version": 1,
+            "project_fields": {k: v.get() for k, v in self.project_entries.items()},
+            "checkbox_states": self._collect_checkbox_states(),
+            "notes_texts": self._collect_notes_texts(),
+            "generator_settings": {
+                "year": self._quick_year.get(),
+                "months": [i + 1 for i, v in enumerate(self._month_vars) if v.get()],
+                "custom_dates_enabled": self._custom_dates_enabled.get(),
+                "custom_start_date": self.start_date.get(),
+                "custom_end_date": self.end_date.get(),
+                "rain_enabled": self._rain_enabled.get(),
+                "rain_station": self.rain_station.get(),
+            },
+        }
+
+    def _restore_session(self, data: dict) -> None:
+        """Populate GUI widgets from a previously saved session dict."""
+        self._suppress_input_traces = True
+        try:
+            # Project text fields
+            for key, value in data.get("project_fields", {}).items():
+                var = self.project_entries.get(key)
+                if var is not None:
+                    var.set(value)
+
+            # Checkbox selections
+            for group_key, items in data.get("checkbox_states", {}).items():
+                group = self.checkbox_vars.get(group_key)
+                if group is None:
+                    continue
+                for label, value in items.items():
+                    var = group.get(label)
+                    if var is not None:
+                        var.set(value)
+            self._refresh_checkbox_visuals()
+
+            # Notes text
+            for group_key, text in data.get("notes_texts", {}).items():
+                widget = self.notes_vars.get(group_key)
+                if widget is not None:
+                    widget.delete("1.0", "end")
+                    widget.insert("1.0", text)
+
+            # Generator settings
+            gs = data.get("generator_settings", {})
+            if "year" in gs:
+                self._quick_year.set(gs["year"])
+            if "months" in gs:
+                saved_months = set(gs["months"])
+                for i, var in enumerate(self._month_vars):
+                    var.set((i + 1) in saved_months)
+            if gs.get("custom_dates_enabled"):
+                self._custom_dates_enabled.set(True)
+                self._custom_dates_frame.grid()
+                self._set_month_selection_state("disabled")
+                if "custom_start_date" in gs:
+                    self.start_date.set(gs["custom_start_date"])
+                if "custom_end_date" in gs:
+                    self.end_date.set(gs["custom_end_date"])
+            if "rain_enabled" in gs:
+                self._rain_enabled.set(gs["rain_enabled"])
+                self._toggle_rain_section()
+            if "rain_station" in gs:
+                self.rain_station.set(gs["rain_station"])
+        except Exception:
+            log.exception("Error restoring session — continuing with partial state")
+        finally:
+            self._suppress_input_traces = False
+        self._update_generate_button_state()
 
     def _collect_checkbox_states(self) -> dict[str, dict[str, str]]:
         return {

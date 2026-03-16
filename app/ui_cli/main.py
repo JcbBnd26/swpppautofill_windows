@@ -16,7 +16,7 @@ from app.core.config_manager import (
     load_project_info,
 )
 from app.core.dates import weekly_dates
-from app.core.fill import generate_batch
+from app.core.fill import bundle_outputs_zip, generate_batch
 from app.core.mesonet import fetch_rainfall, filter_rain_events
 from app.core.mesonet_stations import STATIONS
 from app.core.rain_fill import generate_rain_batch
@@ -112,7 +112,7 @@ def run(
         end_date=end_date,
         date_format=date_format,
         output_dir=str(output_dir),
-        make_zip=not no_zip,
+        make_zip=False,
     )
     dates = list(weekly_dates(options.start_date, options.end_date))
     written = generate_batch(
@@ -173,6 +173,9 @@ def run(
                 original_inspection_type=project.inspection_type or "",
             )
             written.extend(rain_written)
+
+    if not no_zip:
+        written = bundle_outputs_zip(written, output_dir)
 
     typer.echo("\nCreated:")
     for p in written:
