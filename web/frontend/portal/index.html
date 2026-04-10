@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Company Tools</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+</head>
+
+<body class="bg-gray-100 min-h-screen">
+
+    <div x-data="portalApp()" x-init="init()">
+
+        <!-- Header -->
+        <header class="bg-white shadow-sm">
+            <div class="max-w-4xl mx-auto px-6 py-4 flex items-center justify-between">
+                <h1 class="text-lg font-semibold text-gray-800">Company Tools</h1>
+                <div class="flex items-center gap-4 text-sm text-gray-600">
+                    <span x-text="'Logged in as ' + user.display_name"></span>
+                    <a x-show="user.is_admin" href="/admin" class="text-blue-600 hover:underline">Admin</a>
+                    <button @click="logout()" class="text-red-600 hover:underline">Logout</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Loading -->
+        <div x-show="loading" class="text-center mt-20 text-gray-500">Loading…</div>
+
+        <!-- App Cards -->
+        <main x-show="!loading" class="max-w-4xl mx-auto px-6 py-10">
+            <div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                <template x-for="app in user.apps" :key="app.id">
+                    <a :href="app.route_prefix"
+                        class="block bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md hover:border-blue-300 transition">
+                        <h2 class="text-lg font-semibold text-gray-800" x-text="app.name"></h2>
+                        <p class="mt-1 text-sm text-gray-500" x-text="app.description"></p>
+                    </a>
+                </template>
+            </div>
+
+            <p x-show="!loading && user.apps.length === 0" class="text-center text-gray-400 mt-10">No apps available.
+                Contact an admin for access.</p>
+        </main>
+    </div>
+
+    <script>
+        function portalApp() {
+            return {
+                loading: true,
+                user: { display_name: '', is_admin: false, apps: [] },
+
+                async init() {
+                    try {
+                        const res = await fetch('/auth/me', { credentials: 'same-origin' });
+                        if (!res.ok) { window.location.href = '/auth/login'; return; }
+                        this.user = await res.json();
+                    } catch {
+                        window.location.href = '/auth/login';
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                async logout() {
+                    await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' });
+                    window.location.href = '/auth/login';
+                },
+            };
+        }
+    </script>
+</body>
+
+</html>

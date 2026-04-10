@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SWPPP AutoFill</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+    <style>
+        [x-cloak] {
+            display: none !important;
+        }
+
+        /* Smooth toggle transitions */
+        .toggle-btn {
+            transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+        }
+    </style>
+</head>
+
+<body class="bg-gray-100 min-h-screen flex flex-col" x-data="swpppApp()" x-init="init()" x-cloak>
+
+    <!-- ═══ Top Toolbar ═══════════════════════════════════════════════ -->
+    <header class="bg-white shadow-sm sticky top-0 z-30">
+        <div class="max-w-[1600px] mx-auto px-4 py-3 flex items-center justify-between gap-4">
+            <!-- Left: title -->
+            <h1 class="text-lg font-semibold text-gray-800 whitespace-nowrap">SWPPP AutoFill</h1>
+
+            <!-- Center: session controls -->
+            <div class="flex items-center gap-2 flex-wrap justify-center">
+                <button @click="saveSession($event)"
+                    class="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition">Save</button>
+                <button @click="showLoadModal()"
+                    class="px-3 py-1.5 text-sm bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg transition">Load</button>
+                <button @click="exportSession()"
+                    class="px-3 py-1.5 text-sm bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg transition">Export</button>
+                <button @click="importSession()"
+                    class="px-3 py-1.5 text-sm bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg transition">Import</button>
+                <button @click="clearForm()"
+                    class="px-3 py-1.5 text-sm bg-red-100 hover:bg-red-200 text-red-700 rounded-lg transition">Clear</button>
+                <span x-show="sessionName" class="text-xs text-gray-400 ml-1" x-text="'Session: ' + sessionName"></span>
+                <span x-show="saveFlash" x-transition class="text-xs text-green-600 font-medium ml-1">Saved ✓</span>
+            </div>
+
+            <!-- Right: user + back -->
+            <div class="flex items-center gap-3 text-sm whitespace-nowrap">
+                <span class="text-gray-500" x-text="user.display_name"></span>
+                <a href="/" class="text-blue-600 hover:underline">Back to Portal</a>
+            </div>
+        </div>
+    </header>
+
+    <!-- ═══ Loading State ═════════════════════════════════════════════ -->
+    <div x-show="loading" class="flex-1 flex items-center justify-center">
+        <div class="text-gray-400 text-lg">Loading…</div>
+    </div>
+
+    <!-- ═══ Main Content ══════════════════════════════════════════════ -->
+    <div x-show="!loading" class="flex-1 overflow-auto pb-24">
+        <div class="max-w-[1600px] mx-auto px-4 py-6 flex gap-6" style="min-width: 900px;">
+
+            <!-- ─── Left Column (40%) ─────────────────────────────── -->
+            <div class="w-2/5 space-y-6 flex-shrink-0">
+
+                <!-- Section 1: Project Fields -->
+                <section class="bg-white rounded-xl shadow-sm border p-5">
+                    <h2 class="text-base font-semibold text-gray-800 mb-4">Project Fields</h2>
+                    <div class="space-y-3">
+                        <template x-for="field in schema.fields" :key="field.key">
+                            <div>
+                                <label class="block text-sm text-gray-600 mb-1" x-text="field.label"></label>
+                                <input type="text" x-model="formState.project_fields[field.key]"
+                                    class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+                            </div>
+                        </template>
+                    </div>
+                </section>
+
+                <!-- Section 2: Generator Settings -->
+                <section class="bg-white rounded-xl shadow-sm border p-5">
+                    <h2 class="text-base font-semibold text-gray-800 mb-4">Generator Settings</h2>
+
+                    <!-- Year -->
+                    <div class="mb-4">
+                        <label class="block text-sm text-gray-600 mb-1">Year</label>
+                        <select x-model.number="genSettings.year"
+                            class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <template x-for="y in yearOptions" :key="y">
+                                <option :value="y" x-text="y"></option>
+                            </template>
+                        </select>
+                    </div>
+
+                    <!-- Month checkboxes -->
+                    <div class="mb-4" :class="{ 'opacity-40 pointer-events-none': genSettings.customMode }">
+                        <label class="block text-sm text-gray-600 mb-2">Months</label>
+                        <div class="grid grid-cols-4 gap-2">
+                            <template x-for="(name, idx) in monthNames" :key="idx">
+                                <label class="flex items-center gap-1.5 text-sm cursor-pointer">
+                                    <input type="checkbox" :value="idx" x-model="genSettings.selectedMonths"
+                                        :disabled="genSettings.customMode"
+                                        class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                                    <span x-text="name"></span>
+                                </label>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Custom date range toggle -->
+                    <div class="border-t pt-3">
+                        <label class="flex items-center gap-2 text-sm cursor-pointer mb-3">
+                            <input type="checkbox" x-model="genSettings.customMode"
+                                class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                            <span>Use custom date range</span>
+                        </label>
+                        <div x-show="genSettings.customMode" x-transition class="flex gap-3">
+                            <div class="flex-1">
+                                <label class="block text-xs text-gray-500 mb-1">Start Date</label>
+                                <input type="date" x-model="genSettings.customStart"
+                                    class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                            </div>
+                            <div class="flex-1">
+                                <label class="block text-xs text-gray-500 mb-1">End Date</label>
+                                <input type="date" x-model="genSettings.customEnd"
+                                    class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Computed date display -->
+                    <div class="mt-3 text-xs" x-show="computedStart && computedEnd">
+                        <span class="text-gray-500">Date range:</span>
+                        <span class="font-medium text-gray-700" x-text="formatDateRange()"></span>
+                    </div>
+                </section>
+
+                <!-- Section 3: Rain Days -->
+                <section class="bg-white rounded-xl shadow-sm border p-5">
+                    <label class="flex items-center gap-2 text-base font-semibold text-gray-800 cursor-pointer">
+                        <input type="checkbox" x-model="rainSettings.enabled"
+                            class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                        Include Rain Event Reports
+                    </label>
+
+                    <div x-show="rainSettings.enabled" x-transition class="mt-4 space-y-4">
+                        <!-- Station dropdown -->
+                        <div>
+                            <label class="block text-sm text-gray-600 mb-1">Weather Station</label>
+                            <select x-model="rainSettings.station"
+                                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <option value="">Select a station…</option>
+                                <template x-for="s in stations" :key="s.code">
+                                    <option :value="s.display" x-text="s.display"></option>
+                                </template>
+                            </select>
+                        </div>
+
+                        <!-- Threshold -->
+                        <div>
+                            <label class="block text-sm text-gray-600 mb-1">Rain Threshold (inches)</label>
+                            <input type="number" step="0.1" min="0" x-model.number="rainSettings.threshold"
+                                class="w-32 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                        </div>
+
+                        <!-- Fetch / Upload buttons -->
+                        <div class="flex gap-2">
+                            <button @click="fetchRain()"
+                                :disabled="!rainSettings.station || !computedStart || rainFetching"
+                                class="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition disabled:opacity-50">
+                                <span x-show="!rainFetching">Fetch Rain Data</span>
+                                <span x-show="rainFetching">Fetching…</span>
+                            </button>
+                            <button @click="$refs.csvInput.click()"
+                                class="px-4 py-2 text-sm bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg transition">
+                                Upload CSV
+                            </button>
+                            <input type="file" accept=".csv" x-ref="csvInput" class="hidden"
+                                @change="uploadCsv($event)" />
+                        </div>
+
+                        <!-- Stale data warning -->
+                        <div x-show="rainStale"
+                            class="bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2 text-sm text-yellow-800">
+                            Rain data may be outdated — refetch to update
+                        </div>
+
+                        <!-- Rain fetch error -->
+                        <div x-show="rainError" class="text-sm text-red-600" x-text="rainError"></div>
+
+                        <!-- Results -->
+                        <div x-show="rainEvents.length > 0" class="space-y-2">
+                            <p class="text-sm font-medium text-gray-700">
+                                <span x-text="rainEvents.length"></span> rain event<span
+                                    x-show="rainEvents.length !== 1">s</span>
+                                found above <span x-text="rainSettings.threshold"></span>" threshold
+                            </p>
+                            <div class="max-h-48 overflow-y-auto border rounded-lg divide-y">
+                                <template x-for="ev in rainEvents" :key="ev.date">
+                                    <div class="px-3 py-1.5 text-sm flex justify-between">
+                                        <span x-text="formatRainDate(ev.date)"></span>
+                                        <span class="text-blue-700 font-medium"
+                                            x-text="ev.rainfall_inches.toFixed(2) + ' in'"></span>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- ─── Right Column (60%) ────────────────────────────── -->
+            <div class="w-3/5 space-y-5">
+
+                <!-- Section 4: Inspection Checklist -->
+                <template x-for="group in schema.checkbox_groups" :key="group.key">
+                    <section class="bg-white rounded-xl shadow-sm border p-5">
+                        <h2 class="text-base font-semibold text-gray-800 mb-3" x-text="group.label"></h2>
+
+                        <div class="space-y-2">
+                            <template x-for="(q, qi) in group.questions" :key="qi">
+                                <div class="flex items-start gap-3 py-1.5 border-b border-gray-100 last:border-0">
+                                    <!-- Question text -->
+                                    <span class="flex-1 text-sm text-gray-700 leading-snug pt-0.5"
+                                        x-text="q.text"></span>
+
+                                    <!-- Toggle buttons -->
+                                    <div class="flex gap-1 flex-shrink-0">
+                                        <button @click="toggleCheck(group.key, q.text, 'YES')" :class="getCheckState(group.key, q.text) === 'YES'
+                                                ? 'bg-green-600 text-white border-green-600'
+                                                : 'bg-white text-gray-500 border-gray-300 hover:border-green-400'"
+                                            class="toggle-btn px-2.5 py-1 text-xs font-medium rounded border">YES</button>
+                                        <button @click="toggleCheck(group.key, q.text, 'NO')" :class="getCheckState(group.key, q.text) === 'NO'
+                                                ? 'bg-red-600 text-white border-red-600'
+                                                : 'bg-white text-gray-500 border-gray-300 hover:border-red-400'"
+                                            class="toggle-btn px-2.5 py-1 text-xs font-medium rounded border">NO</button>
+                                        <button x-show="q.allow_na" @click="toggleCheck(group.key, q.text, 'N/A')"
+                                            :class="getCheckState(group.key, q.text) === 'N/A'
+                                                ? 'bg-gray-600 text-white border-gray-600'
+                                                : 'bg-white text-gray-500 border-gray-300 hover:border-gray-400'"
+                                            class="toggle-btn px-2.5 py-1 text-xs font-medium rounded border">N/A</button>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+
+                        <!-- Notes -->
+                        <div x-show="group.has_notes" class="mt-3">
+                            <label class="block text-sm text-gray-500 mb-1">Notes</label>
+                            <textarea x-model="formState.notes_texts[group.key]" rows="2"
+                                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"></textarea>
+                        </div>
+                    </section>
+                </template>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Sticky Bottom Bar ═════════════════════════════════════════ -->
+    <div x-show="!loading" class="fixed bottom-0 inset-x-0 bg-white border-t shadow-lg z-30">
+        <div class="max-w-[1600px] mx-auto px-4 py-3 flex items-center gap-4">
+            <button @click="generate()" :disabled="!canGenerate || generating" class="flex-1 py-3 text-base font-semibold rounded-xl transition
+                       bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 disabled:cursor-not-allowed">
+                <span x-show="!generating">Generate PDFs</span>
+                <span x-show="generating" class="flex items-center justify-center gap-2">
+                    <svg class="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"
+                            fill="none" />
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Generating…
+                </span>
+            </button>
+            <span x-show="statusMsg" :class="statusError ? 'text-red-600' : 'text-green-600'"
+                class="text-sm font-medium" x-text="statusMsg"></span>
+        </div>
+    </div>
+
+    <!-- ═══ Save Modal ════════════════════════════════════════════════ -->
+    <div x-show="showSaveModal" x-transition.opacity
+        class="fixed inset-0 bg-black/40 z-40 flex items-center justify-center" @click.self="showSaveModal = false">
+        <div class="bg-white rounded-xl shadow-xl p-6 w-96" @click.stop>
+            <h3 class="text-lg font-semibold text-gray-800 mb-4">Save Session</h3>
+            <input type="text" x-model="saveModalName" placeholder="Session name…" @keydown.enter="confirmSave()"
+                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4" />
+            <div class="flex justify-end gap-2">
+                <button @click="showSaveModal = false"
+                    class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
+                <button @click="confirmSave()" :disabled="!saveModalName.trim()"
+                    class="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Load Modal ════════════════════════════════════════════════ -->
+    <div x-show="showLoadModalFlag" x-transition.opacity
+        class="fixed inset-0 bg-black/40 z-40 flex items-center justify-center" @click.self="showLoadModalFlag = false">
+        <div class="bg-white rounded-xl shadow-xl p-6 w-[28rem]" @click.stop>
+            <h3 class="text-lg font-semibold text-gray-800 mb-4">Load Session</h3>
+            <div x-show="sessionList.length === 0" class="text-gray-400 text-sm py-4 text-center">No saved sessions
+            </div>
+            <div x-show="sessionList.length > 0" class="max-h-72 overflow-y-auto border rounded-lg divide-y">
+                <template x-for="s in sessionList" :key="s.name">
+                    <div class="flex items-center justify-between px-3 py-2 hover:bg-gray-50 cursor-pointer group"
+                        @click="loadSession(s.name)">
+                        <div>
+                            <div class="text-sm font-medium text-gray-800" x-text="s.name"></div>
+                            <div class="text-xs text-gray-400" x-text="timeAgo(s.updated_at)"></div>
+                        </div>
+                        <button @click.stop="deleteSession(s.name)"
+                            class="text-xs text-red-500 hover:text-red-700 opacity-0 group-hover:opacity-100 transition-opacity">Delete</button>
+                    </div>
+                </template>
+            </div>
+            <div class="flex justify-end mt-4">
+                <button @click="showLoadModalFlag = false"
+                    class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Hidden import input ═══════════════════════════════════════ -->
+    <input type="file" accept=".json" x-ref="importInput" class="hidden" @change="handleImport($event)" />
+
+    <!-- ═══ Alpine.js Application ═════════════════════════════════════ -->
+    <script>
+        function swpppApp() {
+            return {
+                // ── State ──────────────────────────────────────
+                loading: true,
+                user: { display_name: '' },
+                schema: { fields: [], checkbox_groups: [] },
+                stations: [],
+
+                // Form state (mirrors GenerateRequest shape)
+                formState: {
+                    project_fields: {},
+                    checkbox_states: {},
+                    notes_texts: {},
+                },
+
+                // Generator settings
+                genSettings: {
+                    year: new Date().getFullYear(),
+                    selectedMonths: [],
+                    customMode: false,
+                    customStart: '',
+                    customEnd: '',
+                },
+
+                // Rain
+                rainSettings: { enabled: false, station: '', threshold: 0.5 },
+                rainEvents: [],
+                rainFetching: false,
+                rainStale: false,
+                rainError: '',
+                _lastRainStation: '',
+                _lastRainStart: '',
+                _lastRainEnd: '',
+
+                // Session
+                sessionName: '',
+                saveFlash: false,
+                showSaveModal: false,
+                saveModalName: '',
+                showLoadModalFlag: false,
+                sessionList: [],
+
+                // Generate
+                generating: false,
+                statusMsg: '',
+                statusError: false,
+
+                // Constants
+                monthNames: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+
+                // ── Computed ────────────────────────────────────
+                get yearOptions() {
+                    const y = new Date().getFullYear();
+                    return [y - 2, y - 1, y, y + 1, y + 2];
+                },
+
+                get computedStart() {
+                    if (this.genSettings.customMode) return this.genSettings.customStart;
+                    const months = (this.genSettings.selectedMonths || []).map(Number).sort((a, b) => a - b);
+                    if (months.length === 0) return '';
+                    const m = months[0];
+                    const d = new Date(this.genSettings.year, m, 1);
+                    return this._toIso(d);
+                },
+
+                get computedEnd() {
+                    if (this.genSettings.customMode) return this.genSettings.customEnd;
+                    const months = (this.genSettings.selectedMonths || []).map(Number).sort((a, b) => a - b);
+                    if (months.length === 0) return '';
+                    const m = months[months.length - 1];
+                    const d = new Date(this.genSettings.year, m + 1, 0); // last day of month
+                    return this._toIso(d);
+                },
+
+                get canGenerate() {
+                    return this.computedStart && this.computedEnd;
+                },
+
+                // ── Init ───────────────────────────────────────
+                async init() {
+                    try {
+                        const [meRes, schemaRes, stationsRes] = await Promise.all([
+                            fetch('/auth/me', { credentials: 'same-origin' }),
+                            fetch('/swppp/api/form-schema', { credentials: 'same-origin' }),
+                            fetch('/swppp/api/stations', { credentials: 'same-origin' }),
+                        ]);
+
+                        if (!meRes.ok) { window.location.href = '/auth/login'; return; }
+
+                        this.user = await meRes.json();
+                        this.schema = await schemaRes.json();
+                        const stData = await stationsRes.json();
+                        this.stations = stData.stations || [];
+
+                        // Initialize form state from schema
+                        this._initFormState();
+                    } catch (e) {
+                        window.location.href = '/auth/login';
+                        return;
+                    } finally {
+                        this.loading = false;
+                    }
+
+                    // Watch for rain staleness
+                    this.$watch('computedStart', () => this._checkRainStale());
+                    this.$watch('computedEnd', () => this._checkRainStale());
+                    this.$watch('rainSettings.station', () => this._checkRainStale());
+                },
+
+                _initFormState() {
+                    const pf = {};
+                    for (const f of this.schema.fields) pf[f.key] = '';
+                    this.formState.project_fields = pf;
+
+                    const cs = {};
+                    const nt = {};
+                    for (const g of this.schema.checkbox_groups) {
+                        cs[g.key] = {};
+                        for (const q of g.questions) cs[g.key][q.text] = '';
+                        if (g.has_notes) nt[g.key] = '';
+                    }
+                    this.formState.checkbox_states = cs;
+                    this.formState.notes_texts = nt;
+                },
+
+                // ── Checkbox toggles ───────────────────────────
+                toggleCheck(groupKey, questionText, value) {
+                    if (!this.formState.checkbox_states[groupKey]) this.formState.checkbox_states[groupKey] = {};
+                    const current = this.formState.checkbox_states[groupKey][questionText];
+                    this.formState.checkbox_states[groupKey][questionText] = current === value ? '' : value;
+                },
+
+                getCheckState(groupKey, questionText) {
+                    return (this.formState.checkbox_states[groupKey] || {})[questionText] || '';
+                },
+
+                // ── Rain ───────────────────────────────────────
+                async fetchRain() {
+                    if (!this.rainSettings.station || !this.computedStart) return;
+                    this.rainFetching = true;
+                    this.rainError = '';
+                    try {
+                        const res = await fetch('/swppp/api/rain/fetch', {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                station: this.rainSettings.station,
+                                start_date: this.computedStart,
+                                end_date: this.computedEnd,
+                                threshold: this.rainSettings.threshold,
+                            }),
+                        });
+                        if (!res.ok) {
+                            const err = await res.json().catch(() => ({}));
+                            throw new Error(err.detail || 'Failed to fetch rain data');
+                        }
+                        const data = await res.json();
+                        this.rainEvents = data.rain_events || [];
+                        this.rainStale = false;
+                        this._lastRainStation = this.rainSettings.station;
+                        this._lastRainStart = this.computedStart;
+                        this._lastRainEnd = this.computedEnd;
+                    } catch (e) {
+                        this.rainError = e.message;
+                    } finally {
+                        this.rainFetching = false;
+                    }
+                },
+
+                async uploadCsv(event) {
+                    const file = event.target.files[0];
+                    if (!file) return;
+                    event.target.value = '';
+                    this.rainError = '';
+                    const form = new FormData();
+                    form.append('file', file);
+                    form.append('threshold', this.rainSettings.threshold);
+                    try {
+                        const res = await fetch('/swppp/api/rain/parse-csv?threshold=' + this.rainSettings.threshold, {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            body: form,
+                        });
+                        if (!res.ok) {
+                            const err = await res.json().catch(() => ({}));
+                            throw new Error(err.detail || 'Failed to parse CSV');
+                        }
+                        const data = await res.json();
+                        this.rainEvents = data.rain_events || [];
+                        this.rainStale = false;
+                    } catch (e) {
+                        this.rainError = e.message;
+                    }
+                },
+
+                _checkRainStale() {
+                    if (this.rainEvents.length === 0) return;
+                    if (this.computedStart !== this._lastRainStart ||
+                        this.computedEnd !== this._lastRainEnd ||
+                        this.rainSettings.station !== this._lastRainStation) {
+                        this.rainStale = true;
+                    }
+                },
+
+                // ── Generate ───────────────────────────────────
+                async generate() {
+                    if (!this.canGenerate || this.generating) return;
+                    this.generating = true;
+                    this.statusMsg = '';
+                    this.statusError = false;
+
+                    const payload = {
+                        project_fields: { ...this.formState.project_fields },
+                        checkbox_states: JSON.parse(JSON.stringify(this.formState.checkbox_states)),
+                        notes_texts: { ...this.formState.notes_texts },
+                        start_date: this.computedStart,
+                        end_date: this.computedEnd,
+                        rain_days: (this.rainSettings.enabled && this.rainEvents.length > 0) ? this.rainEvents : [],
+                        original_inspection_type: this.formState.project_fields['inspection_type'] || '',
+                    };
+
+                    try {
+                        const res = await fetch('/swppp/api/generate', {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload),
+                        });
+                        if (!res.ok) {
+                            const err = await res.json().catch(() => ({}));
+                            throw new Error(err.detail || 'Generation failed');
+                        }
+                        const blob = await res.blob();
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = 'swppp_outputs.zip';
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                        URL.revokeObjectURL(url);
+                        this.statusMsg = 'Download complete';
+                        this.statusError = false;
+                    } catch (e) {
+                        this.statusMsg = e.message;
+                        this.statusError = true;
+                    } finally {
+                        this.generating = false;
+                    }
+                },
+
+                // ── Session: Save ──────────────────────────────
+                async saveSession(event) {
+                    const forcePrompt = event && event.shiftKey;
+                    if (!this.sessionName || forcePrompt) {
+                        this.saveModalName = this.sessionName || '';
+                        this.showSaveModal = true;
+                        this.$nextTick(() => {
+                            const input = this.$el.querySelector('[x-model="saveModalName"]');
+                            if (input) input.focus();
+                        });
+                        return;
+                    }
+                    await this._doSave(this.sessionName);
+                },
+
+                async confirmSave() {
+                    const name = this.saveModalName.trim();
+                    if (!name) return;
+                    this.showSaveModal = false;
+                    await this._doSave(name);
+                },
+
+                async _doSave(name) {
+                    const body = this._collectSessionData(name);
+                    try {
+                        const res = await fetch('/swppp/api/sessions/' + encodeURIComponent(name), {
+                            method: 'PUT',
+                            credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(body),
+                        });
+                        if (!res.ok) throw new Error('Save failed');
+                        this.sessionName = name;
+                        this.saveFlash = true;
+                        setTimeout(() => this.saveFlash = false, 2000);
+                    } catch (e) {
+                        alert('Failed to save session: ' + e.message);
+                    }
+                },
+
+                // ── Session: Load ──────────────────────────────
+                async showLoadModal() {
+                    try {
+                        const res = await fetch('/swppp/api/sessions', { credentials: 'same-origin' });
+                        if (!res.ok) throw new Error();
+                        const data = await res.json();
+                        this.sessionList = data.sessions || [];
+                    } catch {
+                        this.sessionList = [];
+                    }
+                    this.showLoadModalFlag = true;
+                },
+
+                async loadSession(name) {
+                    try {
+                        const res = await fetch('/swppp/api/sessions/' + encodeURIComponent(name), { credentials: 'same-origin' });
+                        if (!res.ok) throw new Error('Session not found');
+                        const data = await res.json();
+                        this._applySessionData(data, name);
+                        this.showLoadModalFlag = false;
+                    } catch (e) {
+                        alert('Failed to load session: ' + e.message);
+                    }
+                },
+
+                async deleteSession(name) {
+                    if (!confirm('Delete session "' + name + '"?')) return;
+                    try {
+                        await fetch('/swppp/api/sessions/' + encodeURIComponent(name), {
+                            method: 'DELETE', credentials: 'same-origin',
+                        });
+                        this.sessionList = this.sessionList.filter(s => s.name !== name);
+                        if (this.sessionName === name) this.sessionName = '';
+                    } catch { /* ignore */ }
+                },
+
+                // ── Session: Export ─────────────────────────────
+                exportSession() {
+                    const data = this._collectSessionData(this.sessionName || 'export');
+                    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = (this.sessionName || 'swppp_session') + '.json';
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    URL.revokeObjectURL(url);
+                },
+
+                // ── Session: Import ─────────────────────────────
+                importSession() {
+                    this.$refs.importInput.click();
+                },
+
+                async handleImport(event) {
+                    const file = event.target.files[0];
+                    if (!file) return;
+                    event.target.value = '';
+                    try {
+                        const text = await file.text();
+                        const data = JSON.parse(text);
+                        if (typeof data !== 'object' || data === null) throw new Error('Invalid JSON');
+                        const name = data.session_name || file.name.replace(/\.json$/i, '');
+                        this._applySessionData(data, name);
+                    } catch (e) {
+                        alert('Failed to import: ' + e.message);
+                    }
+                },
+
+                // ── Session: Clear ──────────────────────────────
+                clearForm() {
+                    if (!confirm('Clear all fields?')) return;
+                    this._initFormState();
+                    this.genSettings = {
+                        year: new Date().getFullYear(),
+                        selectedMonths: [],
+                        customMode: false,
+                        customStart: '',
+                        customEnd: '',
+                    };
+                    this.rainSettings = { enabled: false, station: '', threshold: 0.5 };
+                    this.rainEvents = [];
+                    this.rainStale = false;
+                    this.rainError = '';
+                    this.sessionName = '';
+                    this.statusMsg = '';
+                },
+
+                // ── Session helpers ─────────────────────────────
+                _collectSessionData(name) {
+                    return {
+                        session_name: name,
+                        project_fields: { ...this.formState.project_fields },
+                        checkbox_states: JSON.parse(JSON.stringify(this.formState.checkbox_states)),
+                        notes_texts: { ...this.formState.notes_texts },
+                        generator_settings: { ...this.genSettings, selectedMonths: [...this.genSettings.selectedMonths] },
+                        rain_settings: { ...this.rainSettings },
+                        rain_events: [...this.rainEvents],
+                    };
+                },
+
+                _applySessionData(data, name) {
+                    // Project fields
+                    if (data.project_fields) {
+                        for (const key of Object.keys(this.formState.project_fields)) {
+                            this.formState.project_fields[key] = data.project_fields[key] || '';
+                        }
+                    }
+                    // Checkbox states
+                    if (data.checkbox_states) {
+                        for (const gKey of Object.keys(this.formState.checkbox_states)) {
+                            if (!data.checkbox_states[gKey]) continue;
+                            for (const qText of Object.keys(this.formState.checkbox_states[gKey])) {
+                                this.formState.checkbox_states[gKey][qText] = data.checkbox_states[gKey][qText] || '';
+                            }
+                        }
+                    }
+                    // Notes
+                    if (data.notes_texts) {
+                        for (const gKey of Object.keys(this.formState.notes_texts)) {
+                            this.formState.notes_texts[gKey] = data.notes_texts[gKey] || '';
+                        }
+                    }
+                    // Generator settings
+                    if (data.generator_settings) {
+                        const gs = data.generator_settings;
+                        this.genSettings.year = gs.year || new Date().getFullYear();
+                        this.genSettings.selectedMonths = gs.selectedMonths || [];
+                        this.genSettings.customMode = gs.customMode || false;
+                        this.genSettings.customStart = gs.customStart || '';
+                        this.genSettings.customEnd = gs.customEnd || '';
+                    }
+                    // Rain settings
+                    if (data.rain_settings) {
+                        this.rainSettings.enabled = data.rain_settings.enabled || false;
+                        this.rainSettings.station = data.rain_settings.station || '';
+                        this.rainSettings.threshold = data.rain_settings.threshold ?? 0.5;
+                    }
+                    // Rain events
+                    this.rainEvents = data.rain_events || [];
+                    this.rainStale = false;
+                    this.sessionName = name || '';
+                },
+
+                // ── Utilities ───────────────────────────────────
+                _toIso(d) {
+                    const y = d.getFullYear();
+                    const m = String(d.getMonth() + 1).padStart(2, '0');
+                    const day = String(d.getDate()).padStart(2, '0');
+                    return `${y}-${m}-${day}`;
+                },
+
+                formatDateRange() {
+                    if (!this.computedStart || !this.computedEnd) return '';
+                    return this._formatDate(this.computedStart) + ' — ' + this._formatDate(this.computedEnd);
+                },
+
+                _formatDate(iso) {
+                    const [y, m, d] = iso.split('-');
+                    return `${parseInt(m)}/${parseInt(d)}/${y}`;
+                },
+
+                formatRainDate(iso) {
+                    const d = new Date(iso + 'T00:00:00');
+                    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                },
+
+                timeAgo(iso) {
+                    if (!iso) return '';
+                    const d = new Date(iso);
+                    const diff = Date.now() - d.getTime();
+                    const mins = Math.floor(diff / 60000);
+                    if (mins < 1) return 'just now';
+                    if (mins < 60) return mins + 'm ago';
+                    const hrs = Math.floor(mins / 60);
+                    if (hrs < 24) return hrs + 'h ago';
+                    const days = Math.floor(hrs / 24);
+                    return days + 'd ago';
+                },
+            };
+        }
+    </script>
+</body>
+
+</html>

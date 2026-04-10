@@ -1,0 +1,26 @@
+[Unit]
+Description=Tools Auth Service (FastAPI)
+After=network.target
+
+[Service]
+Type=notify
+User=tools
+Group=tools
+WorkingDirectory=/opt/tools/repo
+Environment=PYTHONPATH=/opt/tools/repo
+Environment=TOOLS_DATA_DIR=/opt/tools/data
+Environment=TOOLS_DEV_MODE=0
+Environment=TOOLS_BASE_URL=https://tools.example.com
+ExecStart=/opt/tools/venv/bin/gunicorn web.auth.main:app \
+    --worker-class uvicorn.workers.UvicornWorker \
+    --workers 2 \
+    --bind 127.0.0.1:8001 \
+    --access-logfile /var/log/tools/auth-access.log \
+    --error-logfile /var/log/tools/auth-error.log
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

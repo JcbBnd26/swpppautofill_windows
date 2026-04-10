@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Admin — Company Tools</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+</head>
+
+<body class="bg-gray-100 min-h-screen">
+
+    <div x-data="adminApp()" x-init="init()">
+
+        <!-- Header -->
+        <header class="bg-white shadow-sm">
+            <div class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+                <h1 class="text-lg font-semibold text-gray-800">Admin Panel</h1>
+                <div class="flex items-center gap-4 text-sm">
+                    <a href="/" class="text-blue-600 hover:underline">Back to Portal</a>
+                    <span class="text-gray-500" x-text="user.display_name"></span>
+                </div>
+            </div>
+        </header>
+
+        <div x-show="loading" class="text-center mt-20 text-gray-500">Loading…</div>
+
+        <main x-show="!loading" class="max-w-6xl mx-auto px-6 py-8 space-y-10">
+
+            <!-- ── Section A: Generate Invite ──────────────────────── -->
+            <section class="bg-white rounded-xl shadow-sm border p-6">
+                <h2 class="text-lg font-semibold text-gray-800 mb-4">Generate Invite Code</h2>
+                <div class="flex flex-wrap gap-4 items-end">
+                    <div class="flex-1 min-w-[200px]">
+                        <label class="block text-sm text-gray-600 mb-1">Name</label>
+                        <input type="text" x-model="invite.name" placeholder="e.g. Mike R."
+                            class="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-600 mb-1">Apps</label>
+                        <div class="flex gap-3">
+                            <template x-for="a in allApps" :key="a.id">
+                                <label class="flex items-center gap-1 text-sm">
+                                    <input type="checkbox" :value="a.id" x-model="invite.apps" />
+                                    <span x-text="a.name"></span>
+                                </label>
+                            </template>
+                        </div>
+                    </div>
+                    <button @click="generateInvite()" :disabled="!invite.name.trim() || invite.apps.length === 0"
+                        class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg transition disabled:opacity-50">Generate</button>
+                </div>
+
+                <!-- Generated code display -->
+                <div x-show="generatedCode" class="mt-4 bg-green-50 border border-green-200 rounded-lg p-4">
+                    <p class="text-sm text-green-800 mb-2">Invite created!</p>
+                    <div class="flex items-center gap-3 flex-wrap">
+                        <code class="text-lg font-mono font-bold text-green-900" x-text="generatedCode"></code>
+                        <button @click="copyText(generatedCode)"
+                            class="text-xs bg-green-200 hover:bg-green-300 px-2 py-1 rounded">Copy Code</button>
+                        <button @click="copyText(generatedLink)"
+                            class="text-xs bg-green-200 hover:bg-green-300 px-2 py-1 rounded">Copy Link</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ── Section B: Pending Invites ──────────────────────── -->
+            <section class="bg-white rounded-xl shadow-sm border p-6">
+                <h2 class="text-lg font-semibold text-gray-800 mb-4">Pending Invites</h2>
+                <div x-show="pendingInvites.length === 0" class="text-gray-400 text-sm">None</div>
+                <table x-show="pendingInvites.length > 0" class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-gray-500 border-b">
+                            <th class="py-2">Code</th>
+                            <th>Name</th>
+                            <th>Apps</th>
+                            <th>Created</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="inv in pendingInvites" :key="inv.id">
+                            <tr class="border-b last:border-0">
+                                <td class="py-2 font-mono text-xs" x-text="inv.id"></td>
+                                <td x-text="inv.display_name"></td>
+                                <td x-text="inv.app_permissions.join(', ')"></td>
+                                <td x-text="timeAgo(inv.created_at)"></td>
+                                <td>
+                                    <button @click="revokeInvite(inv.id)"
+                                        class="text-red-600 hover:underline text-xs">Cancel</button>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </section>
+
+            <!-- ── Section C: Active Users ─────────────────────────── -->
+            <section class="bg-white rounded-xl shadow-sm border p-6">
+                <h2 class="text-lg font-semibold text-gray-800 mb-4">Users</h2>
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-gray-500 border-b">
+                            <th class="py-2">Name</th>
+                            <th>Status</th>
+                            <th>Admin</th>
+                            <th>Apps</th>
+                            <th>Last Seen</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="u in users" :key="u.id">
+                            <tr class="border-b last:border-0">
+                                <td class="py-2 font-medium" x-text="u.display_name"></td>
+                                <td>
+                                    <span class="px-2 py-0.5 rounded-full text-xs font-medium"
+                                        :class="u.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'"
+                                        x-text="u.is_active ? 'Active' : 'Inactive'"></span>
+                                </td>
+                                <td>
+                                    <span x-show="u.is_admin"
+                                        class="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">Admin</span>
+                                </td>
+                                <td x-text="u.apps.join(', ')"></td>
+                                <td class="text-gray-500" x-text="timeAgo(u.last_seen_at)"></td>
+                                <td class="space-x-2">
+                                    <button @click="toggleUserActive(u)" class="text-xs hover:underline"
+                                        :class="u.is_active ? 'text-red-600' : 'text-green-600'"
+                                        x-text="u.is_active ? 'Deactivate' : 'Activate'"></button>
+                                    <button @click="manageApps(u)"
+                                        class="text-xs text-blue-600 hover:underline">Apps</button>
+                                    <button @click="viewSessions(u)"
+                                        class="text-xs text-gray-600 hover:underline">Sessions</button>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </section>
+
+            <!-- ── Modal: Manage Apps ──────────────────────────────── -->
+            <div x-show="modal === 'apps'" class="fixed inset-0 bg-black/30 flex items-center justify-center z-50"
+                @click.self="modal = null">
+                <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm">
+                    <h3 class="font-semibold mb-3" x-text="'Apps for ' + modalUser.display_name"></h3>
+                    <template x-for="a in allApps" :key="a.id">
+                        <label class="flex items-center gap-2 py-1 text-sm">
+                            <input type="checkbox" :checked="modalUser.apps.includes(a.id)"
+                                @change="toggleApp(modalUser, a.id, $event.target.checked)" />
+                            <span x-text="a.name"></span>
+                        </label>
+                    </template>
+                    <button @click="modal = null" class="mt-4 text-sm text-gray-500 hover:underline">Close</button>
+                </div>
+            </div>
+
+            <!-- ── Modal: Sessions ─────────────────────────────────── -->
+            <div x-show="modal === 'sessions'" class="fixed inset-0 bg-black/30 flex items-center justify-center z-50"
+                @click.self="modal = null">
+                <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-md">
+                    <h3 class="font-semibold mb-3" x-text="'Sessions for ' + modalUser.display_name"></h3>
+                    <div x-show="modalSessions.length === 0" class="text-gray-400 text-sm">No active sessions</div>
+                    <div class="space-y-2 max-h-60 overflow-y-auto">
+                        <template x-for="s in modalSessions" :key="s.token_prefix">
+                            <div class="flex items-center justify-between text-sm border-b pb-2">
+                                <div>
+                                    <span class="font-mono text-xs text-gray-600" x-text="s.token_prefix"></span>
+                                    <span class="text-gray-400 ml-2" x-text="s.device_label || 'Unknown device'"></span>
+                                </div>
+                                <button @click="killSession(s.token_prefix)"
+                                    class="text-red-600 hover:underline text-xs">Kill</button>
+                            </div>
+                        </template>
+                    </div>
+                    <div class="mt-4 flex gap-3">
+                        <button x-show="modalSessions.length > 0" @click="killAllSessions(modalUser.id)"
+                            class="text-xs text-red-600 hover:underline">Kill All</button>
+                        <button @click="modal = null" class="text-xs text-gray-500 hover:underline">Close</button>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <script>
+        function adminApp() {
+            return {
+                loading: true,
+                user: {},
+                users: [],
+                allApps: [],
+                allInvites: [],
+                invite: { name: '', apps: [] },
+                generatedCode: '',
+                generatedLink: '',
+                modal: null,
+                modalUser: {},
+                modalSessions: [],
+
+                get pendingInvites() {
+                    return this.allInvites.filter(i => i.status === 'pending');
+                },
+
+                async init() {
+                    try {
+                        const me = await this.api('/auth/me');
+                        if (!me.is_admin) { window.location.href = '/'; return; }
+                        this.user = me;
+                        await this.refresh();
+                    } catch {
+                        window.location.href = '/auth/login';
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                async refresh() {
+                    const [u, inv, apps] = await Promise.all([
+                        this.api('/admin/users'),
+                        this.api('/admin/invites'),
+                        this.api('/admin/apps'),
+                    ]);
+                    this.users = u.users;
+                    this.allInvites = inv.invites;
+                    this.allApps = apps.apps;
+                },
+
+                async generateInvite() {
+                    const data = await this.api('/admin/invites', 'POST', {
+                        display_name: this.invite.name.trim(),
+                        app_permissions: this.invite.apps,
+                    });
+                    this.generatedCode = data.code;
+                    this.generatedLink = data.link;
+                    this.invite = { name: '', apps: [] };
+                    await this.refresh();
+                },
+
+                async revokeInvite(code) {
+                    if (!confirm('Cancel this invite?')) return;
+                    await this.api(`/admin/invites/${encodeURIComponent(code)}`, 'DELETE');
+                    await this.refresh();
+                },
+
+                async toggleUserActive(u) {
+                    const action = u.is_active ? 'Deactivate' : 'Activate';
+                    if (!confirm(`${action} ${u.display_name}?`)) return;
+                    await this.api(`/admin/users/${u.id}`, 'PATCH', { is_active: !u.is_active });
+                    await this.refresh();
+                },
+
+                manageApps(u) {
+                    this.modalUser = u;
+                    this.modal = 'apps';
+                },
+
+                async toggleApp(u, appId, checked) {
+                    if (checked) {
+                        await this.api(`/admin/users/${u.id}/apps`, 'POST', { app_id: appId });
+                    } else {
+                        await this.api(`/admin/users/${u.id}/apps/${appId}`, 'DELETE');
+                    }
+                    await this.refresh();
+                    // Keep modal user in sync
+                    this.modalUser = this.users.find(x => x.id === u.id) || u;
+                },
+
+                async viewSessions(u) {
+                    this.modalUser = u;
+                    const data = await this.api(`/admin/users/${u.id}/sessions`);
+                    this.modalSessions = data.sessions;
+                    this.modal = 'sessions';
+                },
+
+                async killSession(prefix) {
+                    await this.api(`/admin/sessions/${prefix.replace('....', '')}`, 'DELETE');
+                    await this.viewSessions(this.modalUser);
+                },
+
+                async killAllSessions(userId) {
+                    if (!confirm('Kill all sessions for this user?')) return;
+                    await this.api(`/admin/users/${userId}/sessions`, 'DELETE');
+                    await this.viewSessions(this.modalUser);
+                },
+
+                copyText(text) {
+                    navigator.clipboard.writeText(text);
+                },
+
+                timeAgo(iso) {
+                    if (!iso) return '';
+                    const diff = Date.now() - new Date(iso).getTime();
+                    const mins = Math.floor(diff / 60000);
+                    if (mins < 1) return 'just now';
+                    if (mins < 60) return mins + 'm ago';
+                    const hrs = Math.floor(mins / 60);
+                    if (hrs < 24) return hrs + 'h ago';
+                    const days = Math.floor(hrs / 24);
+                    return days + 'd ago';
+                },
+
+                async api(path, method = 'GET', body = null) {
+                    const opts = { method, credentials: 'same-origin', headers: {} };
+                    if (body) {
+                        opts.headers['Content-Type'] = 'application/json';
+                        opts.body = JSON.stringify(body);
+                    }
+                    const res = await fetch(path, opts);
+                    if (res.status === 401) { window.location.href = '/auth/login'; throw new Error('401'); }
+                    if (res.status === 403) { window.location.href = '/'; throw new Error('403'); }
+                    if (!res.ok) {
+                        const err = await res.json().catch(() => ({}));
+                        alert(err.detail || 'Request failed');
+                        throw new Error(err.detail || res.statusText);
+                    }
+                    return res.json();
+                },
+            };
+        }
+    </script>
+</body>
+
+</html>
