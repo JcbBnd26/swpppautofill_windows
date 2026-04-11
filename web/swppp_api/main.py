@@ -50,7 +50,7 @@ MAPPING_YAML = PROJECT_ROOT / "app" / "core" / "odot_mapping.yaml"
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB
 MAX_SESSION_NAME = 200
 
-DEV_MODE = os.environ.get("TOOLS_DEV_MODE", "1") == "1"
+DEV_MODE = os.environ.get("TOOLS_DEV_MODE", "0") == "1"
 BASE_URL = os.environ.get("TOOLS_BASE_URL", "http://localhost:8001")
 
 
@@ -327,7 +327,11 @@ async def save_session(
 
 
 @app.get("/swppp/api/sessions/{name}/export")
-def export_session(name: str, user: dict = Depends(_require_swppp)):
+def export_session(
+    name: str,
+    background_tasks: BackgroundTasks,
+    user: dict = Depends(_require_swppp),
+):
     _validate_session_name(name)
     with session_db.connect() as conn:
         data = session_db.get_session(conn, user["id"], name)
@@ -335,8 +339,10 @@ def export_session(name: str, user: dict = Depends(_require_swppp)):
         raise HTTPException(status_code=404, detail="Session not found")
 
     content = json.dumps(data, indent=2).encode("utf-8")
+    tmp_path = _write_temp_json(name, content)
+    background_tasks.add_task(os.unlink, tmp_path)
     return FileResponse(
-        path=_write_temp_json(name, content),
+        path=tmp_path,
         media_type="application/json",
         filename=f"{name}.json",
     )
@@ -462,7 +468,7 @@ def generate_pdf(
 
 # ── Dev-mode: serve SWPPP frontend ──────────────────────────────────────
 
-DEV_MODE = os.environ.get("TOOLS_DEV_MODE", "1") == "1"
+DEV_MODE = os.environ.get("TOOLS_DEV_MODE", "0") == "1"
 SWPPP_FRONTEND_DIR = PROJECT_ROOT / "web" / "frontend" / "swppp"
 
 if DEV_MODE:

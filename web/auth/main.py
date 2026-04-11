@@ -40,7 +40,7 @@ from web.auth.models import (
 log = logging.getLogger(__name__)
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend" / "portal"
-DEV_MODE = os.environ.get("TOOLS_DEV_MODE", "1") == "1"
+DEV_MODE = os.environ.get("TOOLS_DEV_MODE", "0") == "1"
 BASE_URL = os.environ.get("TOOLS_BASE_URL", "http://localhost:8001")
 COOKIE_MAX_AGE = 90 * 24 * 60 * 60  # 90 days
 

@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - **VPS**: Ubuntu 24.04 LTS (DigitalOcean, Linode, etc.) with root SSH access
-- **Domain**: DNS A record pointing to the VPS IP (e.g. `tools.yourdomain.com`)
+- **Domain**: DNS A record pointing to the VPS IP (`SW3P.pro`)
 - **SSH key**: Configured for root login (disable password auth after setup)
 - **Git access**: The repo must be cloneable from the VPS (public or deploy key)
 
@@ -42,29 +42,21 @@ The script will:
 - Initialize the database and print the admin invite code
 - Set up daily backup and temp-file cleanup crons
 
-### 3. Configure your domain in Nginx
+### 3. Get an SSL certificate
 
 ```bash
-# Replace the placeholder domain
-sed -i 's/tools.example.com/tools.yourdomain.com/g' /etc/nginx/sites-available/tools.conf
-nginx -t && systemctl reload nginx
-```
-
-### 4. Get an SSL certificate
-
-```bash
-certbot --nginx -d tools.yourdomain.com
+certbot --nginx -d SW3P.pro
 ```
 
 Certbot will update the Nginx config with real certificate paths and set up auto-renewal.
 
-### 5. Claim the admin invite
+### 4. Claim the admin invite
 
-Open `https://tools.yourdomain.com/auth/login?code=YOUR_CODE` in a browser and create the admin account. The invite code was printed during the deploy step.
+Open `https://SW3P.pro/auth/login?code=YOUR_CODE` in a browser and create the admin account. The invite code was printed during the deploy step.
 
-### 6. Verify
+### 5. Verify
 
-- Visit `https://tools.yourdomain.com/` — portal should load
+- Visit `https://SW3P.pro/` — portal should load
 - Log in → navigate to SWPPP → fill a form → generate → download ZIP
 - Check service status: `systemctl status tools-auth tools-swppp`
 
