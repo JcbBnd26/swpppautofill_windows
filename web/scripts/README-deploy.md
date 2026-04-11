@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - **VPS**: Ubuntu 24.04 LTS (DigitalOcean, Linode, etc.) with root SSH access
-- **Domain**: DNS A record pointing to the VPS IP (`SW3P.pro`)
+- **Domain**: DNS A record pointing to the VPS IP (`sw3p.pro`)
 - **SSH key**: Configured for root login (disable password auth after setup)
 - **Git access**: The repo must be cloneable from the VPS (public or deploy key)
 
@@ -45,18 +45,18 @@ The script will:
 ### 3. Get an SSL certificate
 
 ```bash
-certbot --nginx -d SW3P.pro
+certbot --nginx -d sw3p.pro
 ```
 
 Certbot will update the Nginx config with real certificate paths and set up auto-renewal.
 
 ### 4. Claim the admin invite
 
-Open `https://SW3P.pro/auth/login?code=YOUR_CODE` in a browser and create the admin account. The invite code was printed during the deploy step.
+Open `https://sw3p.pro/auth/login?code=YOUR_CODE` in a browser and create the admin account. The invite code was printed during the deploy step.
 
 ### 5. Verify
 
-- Visit `https://SW3P.pro/` — portal should load
+- Visit `https://sw3p.pro/` — portal should load
 - Log in → navigate to SWPPP → fill a form → generate → download ZIP
 - Check service status: `systemctl status tools-auth tools-swppp`
 

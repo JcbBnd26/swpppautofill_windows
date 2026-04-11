@@ -10,7 +10,7 @@ WorkingDirectory=/opt/tools/repo
 Environment=PYTHONPATH=/opt/tools/repo
 Environment=TOOLS_DATA_DIR=/opt/tools/data
 Environment=TOOLS_DEV_MODE=0
-Environment=TOOLS_BASE_URL=https://SW3P.pro
+Environment=TOOLS_BASE_URL=https://sw3p.pro
 ExecStart=/opt/tools/venv/bin/gunicorn web.swppp_api.main:app \
     --worker-class uvicorn.workers.UvicornWorker \
     --workers 2 \
