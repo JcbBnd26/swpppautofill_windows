@@ -1,0 +1,29 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # allow manual trigger
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: 143.110.229.161
+          username: root
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd /opt/tools/repo
+            git pull --ff-only
+            /opt/tools/venv/bin/pip install --quiet .
+            /opt/tools/venv/bin/pip install --quiet fastapi "uvicorn[standard]" gunicorn python-multipart
+            cp web/scripts/nginx/tools.conf /etc/nginx/sites-available/tools.conf
+            nginx -t && systemctl reload nginx
+            cp web/scripts/systemd/tools-auth.service /etc/systemd/system/
+            cp web/scripts/systemd/tools-swppp.service /etc/systemd/system/
+            systemctl daemon-reload
+            systemctl restart tools-auth tools-swppp
+            echo "Deploy complete at $(date)"
