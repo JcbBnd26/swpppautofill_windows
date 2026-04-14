@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -37,6 +38,7 @@ CREATE TABLE IF NOT EXISTS apps (
 CREATE TABLE IF NOT EXISTS users (
     id            TEXT PRIMARY KEY,
     display_name  TEXT NOT NULL,
+    password_hash TEXT,
     is_active     INTEGER NOT NULL DEFAULT 1,
     is_admin      INTEGER NOT NULL DEFAULT 0,
     created_at    TEXT NOT NULL,
@@ -119,6 +121,11 @@ def init_db() -> None:
     conn.execute("PRAGMA foreign_keys=ON")
     try:
         conn.executescript(SCHEMA_SQL)
+        # Migrate existing databases: add password_hash column if missing.
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
         conn.commit()
     finally:
         conn.close()
@@ -297,6 +304,60 @@ def get_user_apps(conn: sqlite3.Connection, user_id: str) -> list[str]:
         "SELECT app_id FROM user_app_access WHERE user_id = ?", (user_id,)
     ).fetchall()
     return [r["app_id"] for r in rows]
+
+
+# ── Passwords ────────────────────────────────────────────────────────────
+
+
+def _hash_password(password: str) -> str:
+    """Hash a password with scrypt.  Returns 'salt_hex:hash_hex'."""
+    salt = os.urandom(16)
+    h = hashlib.scrypt(password.encode(), salt=salt, n=16384, r=8, p=1, dklen=32)
+    return salt.hex() + ":" + h.hex()
+
+
+def _verify_password(password: str, stored_hash: str) -> bool:
+    """Verify a password against a stored 'salt_hex:hash_hex' string."""
+    try:
+        salt_hex, hash_hex = stored_hash.split(":", 1)
+        salt = bytes.fromhex(salt_hex)
+        expected = bytes.fromhex(hash_hex)
+    except (ValueError, AttributeError):
+        return False
+    h = hashlib.scrypt(password.encode(), salt=salt, n=16384, r=8, p=1, dklen=32)
+    return secrets.compare_digest(h, expected)
+
+
+def set_user_password(conn: sqlite3.Connection, user_id: str, password: str) -> None:
+    """Set (or replace) a user's password."""
+    conn.execute(
+        "UPDATE users SET password_hash = ? WHERE id = ?",
+        (_hash_password(password), user_id),
+    )
+
+
+def authenticate_user(
+    conn: sqlite3.Connection,
+    display_name: str,
+    password: str,
+) -> dict[str, Any] | None:
+    """Look up a user by display_name + password.  Returns user dict or None."""
+    rows = conn.execute(
+        "SELECT id, display_name, password_hash, is_active, is_admin "
+        "FROM users WHERE display_name = ? COLLATE NOCASE",
+        (display_name,),
+    ).fetchall()
+    for row in rows:
+        user = dict(row)
+        if not user["is_active"]:
+            continue
+        if not user["password_hash"]:
+            continue
+        if _verify_password(password, user["password_hash"]):
+            user["apps"] = get_user_apps(conn, user["id"])
+            del user["password_hash"]
+            return user
+    return None
 
 
 # ── Sessions ─────────────────────────────────────────────────────────────

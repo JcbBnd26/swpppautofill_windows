@@ -438,6 +438,143 @@ class TestAdminInvitesExtended:
         assert r.status_code == 422
 
 
+# ── Password Auth ────────────────────────────────────────────────────────
+
+
+class TestPasswordAuth:
+    def test_set_and_login_with_password(self):
+        admin = _admin_client()
+        # Set a password on the admin account
+        r = admin.post("/auth/set-password", json={"password": "TestPass123!"})
+        assert r.status_code == 200
+
+        # Log out
+        admin.post("/auth/logout", follow_redirects=False)
+
+        # Log back in with password
+        c = TestClient(app, cookies={})
+        r = c.post(
+            "/auth/login",
+            json={"display_name": "TestAdmin", "password": "TestPass123!"},
+        )
+        assert r.status_code == 200
+        assert r.json()["success"] is True
+        assert "tools_session" in r.cookies
+
+        # Verify session is valid
+        me = c.get("/auth/me")
+        assert me.status_code == 200
+        assert me.json()["display_name"] == "TestAdmin"
+
+    def test_login_wrong_password(self):
+        # Create a user with a password
+        with db.connect() as conn:
+            db.seed_app(conn, "swppp", "SWPPP AutoFill", "desc", "/swppp")
+            code = db.create_invite(conn, "WrongPwUser", ["swppp"])
+        c = TestClient(app, cookies={})
+        c.post("/auth/claim", json={"code": code})
+        c.post("/auth/set-password", json={"password": "CorrectPass1"})
+
+        c2 = TestClient(app, cookies={})
+        r = c2.post(
+            "/auth/login",
+            json={"display_name": "WrongPwUser", "password": "WrongPassword"},
+        )
+        assert r.status_code == 401
+
+    def test_login_nonexistent_user(self):
+        c = TestClient(app, cookies={})
+        r = c.post(
+            "/auth/login",
+            json={"display_name": "NoSuchUser", "password": "whatever"},
+        )
+        assert r.status_code == 401
+
+    def test_login_no_password_set(self):
+        """User without a password can't use password login."""
+        with db.connect() as conn:
+            db.seed_app(conn, "swppp", "SWPPP AutoFill", "desc", "/swppp")
+            code = db.create_invite(conn, "NoPwUser", ["swppp"])
+        c = TestClient(app, cookies={})
+        c.post("/auth/claim", json={"code": code})
+
+        c2 = TestClient(app, cookies={})
+        r = c2.post(
+            "/auth/login",
+            json={"display_name": "NoPwUser", "password": "anything"},
+        )
+        assert r.status_code == 401
+
+    def test_login_case_insensitive_name(self):
+        with db.connect() as conn:
+            db.seed_app(conn, "swppp", "SWPPP AutoFill", "desc", "/swppp")
+            code = db.create_invite(conn, "CaseTestUser", ["swppp"])
+        c = TestClient(app, cookies={})
+        c.post("/auth/claim", json={"code": code})
+        c.post("/auth/set-password", json={"password": "MyPassword8"})
+
+        c2 = TestClient(app, cookies={})
+        r = c2.post(
+            "/auth/login",
+            json={"display_name": "casetestuser", "password": "MyPassword8"},
+        )
+        assert r.status_code == 200
+
+    def test_set_password_requires_auth(self):
+        c = TestClient(app, cookies={})
+        r = c.post("/auth/set-password", json={"password": "NewPass123!"})
+        assert r.status_code == 401
+
+    def test_set_password_too_short(self):
+        admin = _admin_client()
+        r = admin.post("/auth/set-password", json={"password": "short"})
+        assert r.status_code == 422
+
+    def test_change_password(self):
+        """Setting a new password replaces the old one."""
+        with db.connect() as conn:
+            db.seed_app(conn, "swppp", "SWPPP AutoFill", "desc", "/swppp")
+            code = db.create_invite(conn, "ChangePwUser", ["swppp"])
+        c = TestClient(app, cookies={})
+        c.post("/auth/claim", json={"code": code})
+        c.post("/auth/set-password", json={"password": "OldPassword1"})
+        c.post("/auth/set-password", json={"password": "NewPassword2"})
+
+        # Old password no longer works
+        c2 = TestClient(app, cookies={})
+        r = c2.post(
+            "/auth/login",
+            json={"display_name": "ChangePwUser", "password": "OldPassword1"},
+        )
+        assert r.status_code == 401
+
+        # New password works
+        r = c2.post(
+            "/auth/login",
+            json={"display_name": "ChangePwUser", "password": "NewPassword2"},
+        )
+        assert r.status_code == 200
+
+    def test_deactivated_user_cannot_password_login(self):
+        admin = _admin_client()
+        code = _make_invite(admin, "DeactPwUser")
+        c = TestClient(app, cookies={})
+        c.post("/auth/claim", json={"code": code})
+        c.post("/auth/set-password", json={"password": "ValidPass1!"})
+        me = c.get("/auth/me").json()
+
+        # Deactivate user
+        admin.patch(f"/admin/users/{me['user_id']}", json={"is_active": False})
+
+        # Password login should fail
+        c2 = TestClient(app, cookies={})
+        r = c2.post(
+            "/auth/login",
+            json={"display_name": "DeactPwUser", "password": "ValidPass1!"},
+        )
+        assert r.status_code == 401
+
+
 # ── Phase 5: Extended user tests ─────────────────────────────────────────
 
 

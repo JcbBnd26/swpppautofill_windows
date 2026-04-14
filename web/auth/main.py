@@ -27,11 +27,14 @@ from web.auth.models import (
     InviteCreateResponse,
     InviteInfo,
     InviteListResponse,
+    LoginRequest,
+    LoginResponse,
     MeResponse,
     PatchAppRequest,
     PatchUserRequest,
     SessionInfo,
     SessionListResponse,
+    SetPasswordRequest,
     SuccessResponse,
     UserInfo,
     UserListResponse,
@@ -61,7 +64,7 @@ app = FastAPI(title="Tools Auth Service", lifespan=_lifespan)
 async def refresh_session_cookie(request: Request, call_next):
     response = await call_next(request)
     # Don't re-stamp if the endpoint already set/deleted the cookie
-    if request.url.path in ("/auth/claim", "/auth/logout"):
+    if request.url.path in ("/auth/claim", "/auth/login", "/auth/logout"):
         return response
     token = request.cookies.get("tools_session")
     if token and 200 <= response.status_code < 400:
@@ -156,6 +159,47 @@ def logout(
         db.delete_session(conn, token)
     response.delete_cookie("tools_session", path="/")
     return RedirectResponse(url="/auth/login", status_code=302)
+
+
+@app.post("/auth/login")
+def login_password(
+    body: LoginRequest,
+    request: Request,
+    response: Response,
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    device_label = (request.headers.get("User-Agent") or "")[:200] or None
+    user = db.authenticate_user(conn, body.display_name.strip(), body.password)
+    if not user:
+        log.warning(
+            "Failed password login attempt: name=%s ip=%s",
+            body.display_name.strip(),
+            request.client.host if request.client else "unknown",
+        )
+        raise HTTPException(status_code=401, detail="Invalid name or password")
+    token = db.create_session(conn, user["id"], device_label)
+    log.info("Password login: user_id=%s name=%s", user["id"], user["display_name"])
+    response.set_cookie(
+        key="tools_session",
+        value=token,
+        httponly=True,
+        secure=not DEV_MODE,
+        samesite="lax",
+        path="/",
+        max_age=COOKIE_MAX_AGE,
+    )
+    return LoginResponse(success=True, redirect="/")
+
+
+@app.post("/auth/set-password")
+def set_password(
+    body: SetPasswordRequest,
+    user: dict[str, Any] = Depends(get_current_user),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    db.set_user_password(conn, user["id"], body.password)
+    log.info("Password set: user_id=%s", user["id"])
+    return SuccessResponse()
 
 
 # ── Session-Required ─────────────────────────────────────────────────────

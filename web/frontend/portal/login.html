@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Access Code — Company Tools</title>
+    <title>Login — Company Tools</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
 </head>
@@ -13,9 +13,19 @@
 
     <div x-data="loginApp()" x-init="init()" class="bg-white rounded-2xl shadow-lg p-8 w-full max-w-sm text-center">
         <h1 class="text-xl font-semibold text-gray-800 mb-1">Company Tools</h1>
-        <p class="text-gray-500 text-sm mb-6">Enter your access code</p>
+        <p class="text-gray-500 text-sm mb-4">Sign in to continue</p>
 
-        <form @submit.prevent="submit">
+        <!-- Tab switcher -->
+        <div class="flex rounded-lg bg-gray-100 p-1 mb-6">
+            <button @click="mode = 'code'" :class="mode === 'code' ? 'bg-white shadow font-medium' : 'text-gray-500'"
+                class="flex-1 py-2 text-sm rounded-md transition">Access Code</button>
+            <button @click="mode = 'password'"
+                :class="mode === 'password' ? 'bg-white shadow font-medium' : 'text-gray-500'"
+                class="flex-1 py-2 text-sm rounded-md transition">Password</button>
+        </div>
+
+        <!-- Access Code form -->
+        <form x-show="mode === 'code'" @submit.prevent="submitCode">
             <input type="text" x-model="code" placeholder="TOOLS-XXXX-XXXX" maxlength="16"
                 class="w-full text-center text-lg tracking-widest font-mono border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 uppercase"
                 :disabled="loading" />
@@ -35,13 +45,40 @@
             </button>
         </form>
 
+        <!-- Password form -->
+        <form x-show="mode === 'password'" @submit.prevent="submitPassword">
+            <input type="text" x-model="displayName" placeholder="Name" autocomplete="username"
+                class="w-full border border-gray-300 rounded-lg px-4 py-3 mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                :disabled="loading" />
+            <input type="password" x-model="password" placeholder="Password" autocomplete="current-password"
+                class="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                :disabled="loading" />
+
+            <button type="submit"
+                class="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 rounded-lg transition disabled:opacity-50"
+                :disabled="loading || !displayName.trim() || !password">
+                <span x-show="!loading">Sign In</span>
+                <span x-show="loading" class="flex items-center justify-center gap-2">
+                    <svg class="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"
+                            fill="none" />
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                    </svg>
+                    Signing in…
+                </span>
+            </button>
+        </form>
+
         <p x-show="error" x-text="error" class="mt-4 text-red-600 text-sm"></p>
     </div>
 
     <script>
         function loginApp() {
             return {
+                mode: 'password',
                 code: '',
+                displayName: '',
+                password: '',
                 error: '',
                 loading: false,
 
@@ -50,16 +87,17 @@
                     fetch('/auth/me', { credentials: 'same-origin' })
                         .then(r => { if (r.ok) window.location.href = '/'; });
 
-                    // Pre-fill from ?code= query param
+                    // Pre-fill from ?code= query param — auto-switch to code tab
                     const params = new URLSearchParams(window.location.search);
                     const prefill = params.get('code');
                     if (prefill) {
+                        this.mode = 'code';
                         this.code = prefill;
-                        this.submit();
+                        this.submitCode();
                     }
                 },
 
-                async submit() {
+                async submitCode() {
                     this.error = '';
                     this.loading = true;
                     try {
@@ -74,6 +112,32 @@
                             window.location.href = data.redirect || '/';
                         } else {
                             this.error = data.detail || 'Invalid code';
+                        }
+                    } catch {
+                        this.error = 'Network error — try again';
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                async submitPassword() {
+                    this.error = '';
+                    this.loading = true;
+                    try {
+                        const res = await fetch('/auth/login', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'same-origin',
+                            body: JSON.stringify({
+                                display_name: this.displayName.trim(),
+                                password: this.password,
+                            }),
+                        });
+                        const data = await res.json();
+                        if (res.ok) {
+                            window.location.href = data.redirect || '/';
+                        } else {
+                            this.error = data.detail || 'Invalid name or password';
                         }
                     } catch {
                         this.error = 'Network error — try again';

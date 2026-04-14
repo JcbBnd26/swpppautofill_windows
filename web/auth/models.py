@@ -21,6 +21,20 @@ class ClaimResponse(BaseModel):
     redirect: str
 
 
+class LoginRequest(BaseModel):
+    display_name: str = Field(max_length=200)
+    password: str = Field(min_length=1, max_length=200)
+
+
+class LoginResponse(BaseModel):
+    success: bool
+    redirect: str
+
+
+class SetPasswordRequest(BaseModel):
+    password: str = Field(min_length=8, max_length=200)
+
+
 class AppInfo(BaseModel):
     id: str
     name: str
