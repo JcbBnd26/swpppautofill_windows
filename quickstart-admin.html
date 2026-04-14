@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Admin Quickstart — SWPPP AutoFill</title>
+    <style>
+        :root {
+            --blue: #2563eb;
+            --blue-dark: #1d4ed8;
+            --gray-50: #f9fafb;
+            --gray-100: #f3f4f6;
+            --gray-300: #d1d5db;
+            --gray-500: #6b7280;
+            --gray-700: #374151;
+            --gray-900: #111827;
+            --green-50: #f0fdf4;
+            --green-600: #16a34a;
+            --red-50: #fef2f2;
+            --red-600: #dc2626;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            color: var(--gray-700);
+            line-height: 1.6;
+            background: var(--gray-50);
+            padding: 2rem 1rem;
+        }
+
+        .container {
+            max-width: 720px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            font-size: 1.75rem;
+            color: var(--gray-900);
+            margin-bottom: 0.25rem;
+        }
+
+        .subtitle {
+            color: var(--gray-500);
+            margin-bottom: 2rem;
+        }
+
+        h2 {
+            font-size: 1.25rem;
+            color: var(--gray-900);
+            margin-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .step-num {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: var(--blue);
+            color: #fff;
+            font-size: 0.85rem;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+
+        section {
+            background: #fff;
+            border: 1px solid var(--gray-300);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        p {
+            margin-bottom: 0.75rem;
+        }
+
+        code {
+            background: var(--gray-100);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+
+        .url {
+            font-family: monospace;
+            color: var(--blue);
+        }
+
+        .note {
+            background: var(--green-50);
+            border-left: 3px solid var(--green-600);
+            padding: 0.75rem 1rem;
+            border-radius: 0 8px 8px 0;
+            margin: 0.75rem 0;
+            font-size: 0.9rem;
+        }
+
+        .warn {
+            background: var(--red-50);
+            border-left: 3px solid var(--red-600);
+            padding: 0.75rem 1rem;
+            border-radius: 0 8px 8px 0;
+            margin: 0.75rem 0;
+            font-size: 0.9rem;
+        }
+
+        ol {
+            padding-left: 1.25rem;
+            margin-bottom: 0.75rem;
+        }
+
+        ol li {
+            margin-bottom: 0.5rem;
+        }
+
+        .screenshot-placeholder {
+            border: 2px dashed var(--gray-300);
+            border-radius: 8px;
+            padding: 1.5rem;
+            text-align: center;
+            color: var(--gray-500);
+            font-size: 0.85rem;
+            margin: 0.75rem 0;
+        }
+
+        hr {
+            border: none;
+            border-top: 1px solid var(--gray-300);
+            margin: 2rem 0;
+        }
+
+        footer {
+            text-align: center;
+            color: var(--gray-500);
+            font-size: 0.8rem;
+            margin-top: 2rem;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+
+        <h1>Admin Quickstart Guide</h1>
+        <p class="subtitle">How to log in and out of your admin account on the SWPPP web portal.</p>
+
+        <!-- ───────── LOGIN ───────── -->
+        <section>
+            <h2><span class="step-num">1</span> Open the Login Page</h2>
+            <p>Navigate to the login page in your browser:</p>
+            <p>
+                <strong>Production:</strong> <span class="url">https://sw3p.pro/auth/login</span><br />
+                <strong>Local dev:</strong> <span class="url">http://localhost:8001/auth/login</span>
+            </p>
+            <p>If you're already logged in, the page will automatically redirect you to the portal.</p>
+        </section>
+
+        <section>
+            <h2><span class="step-num">2</span> Sign In with Your Password</h2>
+            <p>The login page has two tabs: <strong>Access Code</strong> and <strong>Password</strong>.</p>
+
+            <ol>
+                <li>Click the <strong>Password</strong> tab.</li>
+                <li>Enter your <strong>Name</strong> (the display name you chose when you first claimed your invite).
+                </li>
+                <li>Enter your <strong>Password</strong>.</li>
+                <li>Click <strong>Sign In</strong>.</li>
+            </ol>
+
+            <div class="note">
+                <strong>Tip:</strong> If you haven't set a password yet, use your original access code on the
+                <strong>Access Code</strong> tab to log in first, then set a password from the portal settings (gear
+                icon).
+            </div>
+
+            <div class="warn">
+                <strong>Access codes are one-time use.</strong> Once you've claimed a code, it cannot be reused. Use
+                password login for all future sign-ins.
+            </div>
+        </section>
+
+        <section>
+            <h2><span class="step-num">3</span> You're on the Portal</h2>
+            <p>After signing in, you land on the <strong>Company Tools</strong> portal. From here you can:</p>
+            <ol>
+                <li>Click any <strong>app card</strong> to open that tool (e.g. SWPPP AutoFill).</li>
+                <li>Click <strong>Admin</strong> (top-right, visible only to admins) to open the Admin Panel.</li>
+                <li>Click the <strong>gear icon</strong> to set or change your password.</li>
+            </ol>
+        </section>
+
+        <hr />
+
+        <!-- ───────── LOGOUT ───────── -->
+        <section>
+            <h2><span class="step-num">4</span> Log Out</h2>
+            <p>To end your session:</p>
+            <ol>
+                <li>From any portal page, look at the <strong>top-right corner</strong> of the header.</li>
+                <li>Click the <strong style="color: var(--red-600);">Logout</strong> button.</li>
+                <li>You'll be redirected back to the login page. Your session cookie is cleared.</li>
+            </ol>
+        </section>
+
+        <hr />
+
+        <!-- ───────── QUICK REFERENCE ───────── -->
+        <section>
+            <h2>Quick Reference</h2>
+            <table style="width:100%; border-collapse:collapse; font-size:0.9rem;">
+                <tr style="border-bottom:1px solid var(--gray-300);">
+                    <td style="padding:8px 4px; font-weight:600;">Login URL</td>
+                    <td style="padding:8px 4px;"><span class="url">https://sw3p.pro/auth/login</span></td>
+                </tr>
+                <tr style="border-bottom:1px solid var(--gray-300);">
+                    <td style="padding:8px 4px; font-weight:600;">Portal URL</td>
+                    <td style="padding:8px 4px;"><span class="url">https://sw3p.pro/</span></td>
+                </tr>
+                <tr style="border-bottom:1px solid var(--gray-300);">
+                    <td style="padding:8px 4px; font-weight:600;">Admin Panel</td>
+                    <td style="padding:8px 4px;"><span class="url">https://sw3p.pro/admin</span></td>
+                </tr>
+                <tr style="border-bottom:1px solid var(--gray-300);">
+                    <td style="padding:8px 4px; font-weight:600;">Sign-in method</td>
+                    <td style="padding:8px 4px;">Name + Password (preferred) or one-time Access Code</td>
+                </tr>
+                <tr>
+                    <td style="padding:8px 4px; font-weight:600;">Log out</td>
+                    <td style="padding:8px 4px;">Click <strong>Logout</strong> in the top-right header</td>
+                </tr>
+            </table>
+        </section>
+
+        <footer>SWPPP AutoFill &mdash; Admin Quickstart</footer>
+    </div>
+</body>
+
+</html>
