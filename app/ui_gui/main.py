@@ -488,9 +488,7 @@ class App(tk.Tk):
         ).pack(side="left")
         lr += 1
 
-        self._rain_section_frame = ttk.LabelFrame(
-            left, text="Rain Days", padding=10
-        )
+        self._rain_section_frame = ttk.LabelFrame(left, text="Rain Days", padding=10)
         self._rain_section_frame.grid(
             row=lr, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 8)
         )

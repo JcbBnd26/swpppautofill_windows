@@ -63,21 +63,7 @@
             <!-- ─── Left Column (40%) ─────────────────────────────── -->
             <div class="w-2/5 space-y-6 flex-shrink-0">
 
-                <!-- Section 1: Project Fields -->
-                <section class="bg-white rounded-xl shadow-sm border p-5">
-                    <h2 class="text-base font-semibold text-gray-800 mb-4">Project Fields</h2>
-                    <div class="space-y-3">
-                        <template x-for="field in schema.fields" :key="field.key">
-                            <div>
-                                <label class="block text-sm text-gray-600 mb-1" x-text="field.label"></label>
-                                <input type="text" x-model="formState.project_fields[field.key]"
-                                    class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
-                            </div>
-                        </template>
-                    </div>
-                </section>
-
-                <!-- Section 2: Generator Settings -->
+                <!-- Section 1: Generator Settings -->
                 <section class="bg-white rounded-xl shadow-sm border p-5">
                     <h2 class="text-base font-semibold text-gray-800 mb-4">Generator Settings</h2>
 
@@ -205,6 +191,20 @@
                                 </template>
                             </div>
                         </div>
+                    </div>
+                </section>
+
+                <!-- Section 3: Project Fields -->
+                <section class="bg-white rounded-xl shadow-sm border p-5">
+                    <h2 class="text-base font-semibold text-gray-800 mb-4">Project Fields</h2>
+                    <div class="space-y-3">
+                        <template x-for="field in schema.fields" :key="field.key">
+                            <div>
+                                <label class="block text-sm text-gray-600 mb-1" x-text="field.label"></label>
+                                <input type="text" x-model="formState.project_fields[field.key]"
+                                    class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+                            </div>
+                        </template>
                     </div>
                 </section>
             </div>
