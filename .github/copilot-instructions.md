@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-This is a Windows-first Python desktop app that generates weekly ODOT clean-water (SWPPP) inspection PDFs from a fillable AcroForm template (`assets/template.pdf`). It has a Tkinter GUI for daily use, a Typer CLI for scripted runs, and inspection helpers for PDF field analysis.
+This is a Windows-first Python desktop app that generates weekly ODOT clean-water (SWPPP) inspection PDFs from a fillable AcroForm template (`assets/template.pdf`). It has a Tkinter GUI for daily use, a Typer CLI for scripted runs, inspection helpers for PDF field analysis, and a web frontend + API layer (`web/`) for remote access.
 
 ## Tech Stack & Constraints
 
@@ -22,6 +22,19 @@ This is a Windows-first Python desktop app that generates weekly ODOT clean-wate
 - `assets/` — the fillable PDF template
 - `tests/` — pytest test suite
 - `tmp_output/` — scratch/output directory
+- `web/auth/` — FastAPI auth server (login, sessions, admin)
+- `web/swppp_api/` — FastAPI SWPPP API server (form schema, stations, PDF generation)
+- `web/frontend/` — Alpine.js + Tailwind CSS web UI (static HTML served by nginx in prod)
+- `web/scripts/` — deploy scripts, nginx config, systemd units
+
+## Environments
+
+- **Two UIs:** Tkinter desktop (`app/ui_gui/`) and web frontend (`web/frontend/`). When a user reports a bug, confirm which interface they're looking at.
+- **Two API servers:** auth on `:8001` (`web/auth/main.py`) and SWPPP on `:8002` (`web/swppp_api/main.py`).
+- **Two databases — completely separate, share no data:** local dev uses `web/data/auth.db`; production uses `/opt/tools/data/auth.db` (via `TOOLS_DATA_DIR` env var). Invite codes, sessions, and users generated locally do not exist in production.
+- **Dev mode:** `$env:TOOLS_DEV_MODE="1"` — single server on `:8001`, SWPPP sub-app mounted via `app.mount("", _swppp_app)`. HTML served by FastAPI.
+- **Production:** nginx on `sw3p.pro:443` serves static HTML, proxies `/auth/*` → `:8001`, `/swppp/api/*` → `:8002`. Both services share the same `auth.db` for session validation.
+- **SSH:** `ssh -i ~/.ssh/swppp-vps-deploy root@143.110.229.161`
 
 ## Coding Style
 
@@ -50,6 +63,7 @@ This is a Windows-first Python desktop app that generates weekly ODOT clean-wate
 - The Mesonet rain data feature (`mesonet.py`) chunks large date ranges into ≤99-day requests to avoid the email-only path.
 - Missing Mesonet data is indicated by values < -990 — treat these as missing, never as zero.
 - Always use `pypdf` (not PyPDF2 or other forks).
+- Local and production databases are completely independent (`web/data/auth.db` vs `/opt/tools/data/auth.db`). Never assume data created locally exists in production.
 
 ## When Making Changes
 
@@ -57,3 +71,11 @@ This is a Windows-first Python desktop app that generates weekly ODOT clean-wate
 - Don't refactor surrounding code unless asked.
 - After any code change, run `pytest` to confirm nothing broke.
 - PowerShell is the terminal — use `;` to chain commands, not `&&`.
+- When a tool or approach fails three times in a row, stop and switch strategies — don't try a fourth variation of the same broken approach.
+
+## Debugging & Production Safety
+
+- **Check data before infrastructure.** When something fails, the first diagnostic should always be: does the expected data exist? Is the row in the database? Is the file on disk? Is the env var set? Only after confirming the data layer is correct should you move to network, middleware, or service-level investigation. Run `SELECT` queries and read logs before theorizing about CORS, CSRF, or middleware.
+- **Confirm the target before modifying.** Before making any change, explicitly state which environment (local vs. production) and which component (Tkinter vs. web, auth vs. SWPPP API) is being modified. When the user reports a bug, ask which interface they're using if it's ambiguous.
+- **Never mutate production state during diagnostics.** All production investigation must be read-only: `SELECT` queries, `GET`/`curl` requests, log reads. No `POST`, `UPDATE`, `DELETE`, or claiming invite codes during debugging — unless the user explicitly authorizes it.
+- **Errors are evidence — never discard them.** Any `catch` or `except` block that hides the original error message is a bug, not a convenience. When writing error handlers, always preserve and surface the original error. When debugging, if the user reports a generic error message, suspect the error handler before suspecting the infrastructure.
