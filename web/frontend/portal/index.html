@@ -42,6 +42,25 @@
 
             <p x-show="!loading && user.apps.length === 0" class="text-center text-gray-400 mt-10">No apps available.
                 Contact an admin for access.</p>
+
+            <!-- Set Password -->
+            <div class="mt-10 max-w-sm mx-auto bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <h3 class="text-base font-semibold text-gray-800 mb-1">Password Login</h3>
+                <p class="text-sm text-gray-500 mb-4">Set a password so you can log in with your name instead of an access code.</p>
+                <form @submit.prevent="setPassword">
+                    <input type="password" x-model="newPassword" placeholder="New password (min 8 chars)"
+                        autocomplete="new-password"
+                        class="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        :disabled="pwLoading" />
+                    <button type="submit"
+                        class="mt-3 w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2.5 rounded-lg transition disabled:opacity-50"
+                        :disabled="pwLoading || newPassword.length < 8">
+                        <span x-show="!pwLoading" x-text="pwSuccess ? '✓ Password saved' : 'Set Password'"></span>
+                        <span x-show="pwLoading">Saving…</span>
+                    </button>
+                </form>
+                <p x-show="pwError" x-text="pwError" class="mt-2 text-red-600 text-xs"></p>
+            </div>
         </main>
     </div>
 
@@ -50,6 +69,10 @@
             return {
                 loading: true,
                 user: { display_name: '', is_admin: false, apps: [] },
+                newPassword: '',
+                pwLoading: false,
+                pwError: '',
+                pwSuccess: false,
 
                 async init() {
                     try {
@@ -66,6 +89,31 @@
                 async logout() {
                     await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' });
                     window.location.href = '/auth/login';
+                },
+
+                async setPassword() {
+                    this.pwError = '';
+                    this.pwSuccess = false;
+                    this.pwLoading = true;
+                    try {
+                        const res = await fetch('/auth/set-password', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'same-origin',
+                            body: JSON.stringify({ password: this.newPassword }),
+                        });
+                        if (res.ok) {
+                            this.pwSuccess = true;
+                            this.newPassword = '';
+                        } else {
+                            const data = await res.json();
+                            this.pwError = data.detail || 'Failed to set password';
+                        }
+                    } catch {
+                        this.pwError = 'Network error — try again';
+                    } finally {
+                        this.pwLoading = false;
+                    }
                 },
             };
         }
