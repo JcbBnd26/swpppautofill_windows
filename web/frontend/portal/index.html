@@ -20,9 +20,11 @@
                 <div class="flex items-center gap-4 text-sm text-gray-600">
                     <span x-text="'Logged in as ' + user.display_name"></span>
                     <a x-show="user.is_admin" href="/admin" class="text-blue-600 hover:underline">Admin</a>
-                    <button @click="showSettings = !showSettings" class="text-gray-400 hover:text-gray-600" title="Settings">
+                    <button @click="showSettings = !showSettings" class="text-gray-400 hover:text-gray-600"
+                        title="Settings">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                            <path stroke-linecap="round" stroke-linejoin="round"
+                                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
                             <circle cx="12" cy="12" r="3" />
                         </svg>
                     </button>
@@ -50,7 +52,8 @@
                 Contact an admin for access.</p>
 
             <!-- Set Password -->
-            <div x-show="showSettings" x-transition class="mt-10 max-w-sm mx-auto bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <div x-show="showSettings" x-transition
+                class="mt-10 max-w-sm mx-auto bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                 <h3 class="text-base font-semibold text-gray-800 mb-1">Password Login</h3>
                 <p class="text-sm text-gray-500 mb-4">Set a password so you can log in as
                     <strong x-text="user.display_name"></strong> instead of using an access code.
