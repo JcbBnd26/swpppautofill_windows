@@ -63,65 +63,21 @@
             <!-- ─── Left Column (40%) ─────────────────────────────── -->
             <div class="w-2/5 space-y-6 flex-shrink-0">
 
-                <!-- Section 1: Generator Settings -->
+                <!-- Section 1: Project Fields -->
                 <section class="bg-white rounded-xl shadow-sm border p-5">
-                    <h2 class="text-base font-semibold text-gray-800 mb-4">Generator Settings</h2>
-
-                    <!-- Year -->
-                    <div class="mb-4">
-                        <label class="block text-sm text-gray-600 mb-1">Year</label>
-                        <select x-model.number="genSettings.year"
-                            class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            <template x-for="y in yearOptions" :key="y">
-                                <option :value="y" x-text="y"></option>
-                            </template>
-                        </select>
-                    </div>
-
-                    <!-- Month checkboxes -->
-                    <div class="mb-4" :class="{ 'opacity-40 pointer-events-none': genSettings.customMode }">
-                        <label class="block text-sm text-gray-600 mb-2">Months</label>
-                        <div class="grid grid-cols-4 gap-2">
-                            <template x-for="(name, idx) in monthNames" :key="idx">
-                                <label class="flex items-center gap-1.5 text-sm cursor-pointer">
-                                    <input type="checkbox" :value="idx" x-model="genSettings.selectedMonths"
-                                        :disabled="genSettings.customMode"
-                                        class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-                                    <span x-text="name"></span>
-                                </label>
-                            </template>
-                        </div>
-                    </div>
-
-                    <!-- Custom date range toggle -->
-                    <div class="border-t pt-3">
-                        <label class="flex items-center gap-2 text-sm cursor-pointer mb-3">
-                            <input type="checkbox" x-model="genSettings.customMode"
-                                class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-                            <span>Use custom date range</span>
-                        </label>
-                        <div x-show="genSettings.customMode" x-transition class="flex gap-3">
-                            <div class="flex-1">
-                                <label class="block text-xs text-gray-500 mb-1">Start Date</label>
-                                <input type="date" x-model="genSettings.customStart"
-                                    class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <h2 class="text-base font-semibold text-gray-800 mb-4">Project Fields</h2>
+                    <div class="space-y-3">
+                        <template x-for="field in schema.fields" :key="field.key">
+                            <div>
+                                <label class="block text-sm text-gray-600 mb-1" x-text="field.label"></label>
+                                <input type="text" x-model="formState.project_fields[field.key]"
+                                    class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
                             </div>
-                            <div class="flex-1">
-                                <label class="block text-xs text-gray-500 mb-1">End Date</label>
-                                <input type="date" x-model="genSettings.customEnd"
-                                    class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Computed date display -->
-                    <div class="mt-3 text-xs" x-show="computedStart && computedEnd">
-                        <span class="text-gray-500">Date range:</span>
-                        <span class="font-medium text-gray-700" x-text="formatDateRange()"></span>
+                        </template>
                     </div>
                 </section>
 
-                <!-- Section 3: Rain Days -->
+                <!-- Section 2: Rain Days -->
                 <section class="bg-white rounded-xl shadow-sm border p-5">
                     <label class="flex items-center gap-2 text-base font-semibold text-gray-800 cursor-pointer">
                         <input type="checkbox" x-model="rainSettings.enabled"
@@ -194,17 +150,61 @@
                     </div>
                 </section>
 
-                <!-- Section 3: Project Fields -->
+                <!-- Section 3: Generator Settings -->
                 <section class="bg-white rounded-xl shadow-sm border p-5">
-                    <h2 class="text-base font-semibold text-gray-800 mb-4">Project Fields</h2>
-                    <div class="space-y-3">
-                        <template x-for="field in schema.fields" :key="field.key">
-                            <div>
-                                <label class="block text-sm text-gray-600 mb-1" x-text="field.label"></label>
-                                <input type="text" x-model="formState.project_fields[field.key]"
-                                    class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+                    <h2 class="text-base font-semibold text-gray-800 mb-4">Generator Settings</h2>
+
+                    <!-- Year -->
+                    <div class="mb-4">
+                        <label class="block text-sm text-gray-600 mb-1">Year</label>
+                        <select x-model.number="genSettings.year"
+                            class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <template x-for="y in yearOptions" :key="y">
+                                <option :value="y" x-text="y"></option>
+                            </template>
+                        </select>
+                    </div>
+
+                    <!-- Month checkboxes -->
+                    <div class="mb-4" :class="{ 'opacity-40 pointer-events-none': genSettings.customMode }">
+                        <label class="block text-sm text-gray-600 mb-2">Months</label>
+                        <div class="grid grid-cols-4 gap-2">
+                            <template x-for="(name, idx) in monthNames" :key="idx">
+                                <label class="flex items-center gap-1.5 text-sm cursor-pointer">
+                                    <input type="checkbox" :value="idx" x-model="genSettings.selectedMonths"
+                                        :disabled="genSettings.customMode"
+                                        class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                                    <span x-text="name"></span>
+                                </label>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Custom date range toggle -->
+                    <div class="border-t pt-3">
+                        <label class="flex items-center gap-2 text-sm cursor-pointer mb-3">
+                            <input type="checkbox" x-model="genSettings.customMode"
+                                class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                            <span>Use custom date range</span>
+                        </label>
+                        <div x-show="genSettings.customMode" x-transition class="flex gap-3">
+                            <div class="flex-1">
+                                <label class="block text-xs text-gray-500 mb-1">Start Date</label>
+                                <input type="date" x-model="genSettings.customStart"
+                                    class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                             </div>
-                        </template>
+                            <div class="flex-1">
+                                <label class="block text-xs text-gray-500 mb-1">End Date</label>
+                                <input type="date" x-model="genSettings.customEnd"
+                                    class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Computed date display -->
+                    <div class="mt-3 text-xs" x-show="computedStart && computedEnd">
+                        <span class="text-gray-500">Date range:</span>
+                        <span class="font-medium text-gray-700" x-text="formatDateRange()"></span>
                     </div>
                 </section>
             </div>
