@@ -379,35 +379,6 @@ class App(tk.Tk):
 
         lr = 0
 
-        # -- Project Fields --
-        proj_header = ttk.Frame(left)
-        proj_header.grid(
-            row=lr, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 4)
-        )
-        ttk.Label(proj_header, text="Project Info", font=("Segoe UI", 10, "bold")).pack(
-            side="left"
-        )
-        self._debug_btn_fields = tk.Button(
-            proj_header,
-            text="T",
-            width=2,
-            height=1,
-            font=("Segoe UI", 7, "bold"),
-            relief="raised",
-            bg="#f0f0f0",
-            command=self._fill_test_fields,
-        )
-        if _DEBUG_UI:
-            self._debug_btn_fields.pack(side="right", padx=(2, 0))
-        lr += 1
-
-        self.fields_inner = ttk.Frame(left, borderwidth=1, relief="groove")
-        self.fields_inner.grid(
-            row=lr, column=0, columnspan=2, sticky="nsew", padx=10, pady=(0, 10)
-        )
-        self.fields_inner.columnconfigure(1, weight=1)
-        lr += 1
-
         # ── Generator Settings LabelFrame ──
         settings_frame = ttk.LabelFrame(left, text="Generator Settings", padding=10)
         settings_frame.grid(
@@ -486,21 +457,45 @@ class App(tk.Tk):
         self._custom_dates_frame.grid_remove()
         sr += 1
 
-        ttk.Checkbutton(
+        self._generate_btn = ttk.Button(
             settings_frame,
+            text="Generate",
+            command=self._on_generate_months,
+            width=18,
+        )
+        self._generate_btn.grid(row=sr, column=0, columnspan=2, pady=(8, 0))
+        sr += 1
+
+        self._gen_progress = ttk.Progressbar(
+            settings_frame,
+            orient="horizontal",
+            mode="indeterminate",
+            length=200,
+        )
+        self._gen_progress.grid(row=sr, column=0, columnspan=2, pady=(4, 0))
+        self._gen_progress.grid_remove()
+
+        # ── Rain Days Section ──
+        rain_header = ttk.Frame(left)
+        rain_header.grid(
+            row=lr, column=0, columnspan=2, sticky="ew", padx=10, pady=(4, 0)
+        )
+        ttk.Checkbutton(
+            rain_header,
             text="Rain Days",
             variable=self._rain_enabled,
             command=self._toggle_rain_section,
-        ).grid(row=sr, column=0, columnspan=2, sticky="w", padx=6, pady=(6, 2))
-        sr += 1
+        ).pack(side="left")
+        lr += 1
 
         self._rain_section_frame = ttk.LabelFrame(
-            settings_frame, text="Rain Days", padding=10
+            left, text="Rain Days", padding=10
         )
         self._rain_section_frame.grid(
-            row=sr, column=0, columnspan=2, sticky="ew", padx=6, pady=(0, 0)
+            row=lr, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 8)
         )
         self._rain_section_frame.columnconfigure(0, weight=1)
+        lr += 1
         rr = 0
 
         # Rain buttons
@@ -561,25 +556,35 @@ class App(tk.Tk):
             wraplength=400,
             anchor="w",
         ).grid(row=rr, column=0, sticky="w", pady=(4, 0))
-        sr += 1
 
-        self._generate_btn = ttk.Button(
-            settings_frame,
-            text="Generate",
-            command=self._on_generate_months,
-            width=18,
+        # -- Project Fields --
+        proj_header = ttk.Frame(left)
+        proj_header.grid(
+            row=lr, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 4)
         )
-        self._generate_btn.grid(row=sr, column=0, columnspan=2, pady=(8, 0))
-        sr += 1
+        ttk.Label(proj_header, text="Project Info", font=("Segoe UI", 10, "bold")).pack(
+            side="left"
+        )
+        self._debug_btn_fields = tk.Button(
+            proj_header,
+            text="T",
+            width=2,
+            height=1,
+            font=("Segoe UI", 7, "bold"),
+            relief="raised",
+            bg="#f0f0f0",
+            command=self._fill_test_fields,
+        )
+        if _DEBUG_UI:
+            self._debug_btn_fields.pack(side="right", padx=(2, 0))
+        lr += 1
 
-        self._gen_progress = ttk.Progressbar(
-            settings_frame,
-            orient="horizontal",
-            mode="indeterminate",
-            length=200,
+        self.fields_inner = ttk.Frame(left, borderwidth=1, relief="groove")
+        self.fields_inner.grid(
+            row=lr, column=0, columnspan=2, sticky="nsew", padx=10, pady=(0, 10)
         )
-        self._gen_progress.grid(row=sr, column=0, columnspan=2, pady=(4, 0))
-        self._gen_progress.grid_remove()
+        self.fields_inner.columnconfigure(1, weight=1)
+        lr += 1
 
         ttk.Separator(left).grid(
             row=lr, column=0, columnspan=2, sticky="ew", pady=(8, 8)

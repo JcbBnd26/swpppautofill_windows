@@ -61,7 +61,12 @@ def generate_rain_batch(
 
     # Build the rain event inspection type
     original = (original_inspection_type or "").strip()
-    rain_type = f"Rain Event - {original}" if original else "Rain Event"
+    if original.lower() == "weekly":
+        rain_type = "Rain Event"
+    elif original:
+        rain_type = f"Rain Event - {original}"
+    else:
+        rain_type = "Rain Event"
 
     # Clone project and override inspection_type
     project_dict = _project_to_dict(project)
