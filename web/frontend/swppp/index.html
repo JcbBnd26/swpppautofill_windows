@@ -56,8 +56,16 @@
         <div class="text-gray-400 text-lg">Loading…</div>
     </div>
 
+    <!-- ═══ Global Error ══════════════════════════════════════════════ -->
+    <div x-show="globalError" class="flex-1 flex items-center justify-center">
+        <div class="bg-red-100 border border-red-400 text-red-700 px-6 py-4 rounded max-w-lg text-center">
+            <p class="font-semibold mb-1">Something went wrong</p>
+            <p x-text="globalError"></p>
+        </div>
+    </div>
+
     <!-- ═══ Main Content ══════════════════════════════════════════════ -->
-    <div x-show="!loading" class="flex-1 overflow-auto pb-24">
+    <div x-show="!loading && !globalError" class="flex-1 overflow-auto pb-24">
         <div class="max-w-[1600px] mx-auto px-4 py-6 flex gap-6" style="min-width: 900px;">
 
             <!-- ─── Left Column (40%) ─────────────────────────────── -->
@@ -328,6 +336,7 @@
             return {
                 // ── State ──────────────────────────────────────
                 loading: true,
+                globalError: '',
                 user: { display_name: '' },
                 schema: { fields: [], checkbox_groups: [] },
                 stations: [],
@@ -412,6 +421,16 @@
                         ]);
 
                         if (!meRes.ok) { window.location.href = '/auth/login'; return; }
+                        if (!schemaRes.ok) {
+                            console.error('form-schema failed:', schemaRes.status, await schemaRes.text());
+                            this.globalError = 'Failed to load form schema (HTTP ' + schemaRes.status + ')';
+                            return;
+                        }
+                        if (!stationsRes.ok) {
+                            console.error('stations failed:', stationsRes.status, await stationsRes.text());
+                            this.globalError = 'Failed to load stations (HTTP ' + stationsRes.status + ')';
+                            return;
+                        }
 
                         this.user = await meRes.json();
                         this.schema = await schemaRes.json();
@@ -421,7 +440,8 @@
                         // Initialize form state from schema
                         this._initFormState();
                     } catch (e) {
-                        window.location.href = '/auth/login';
+                        console.error('SWPPP init error:', e);
+                        this.globalError = 'App failed to load: ' + (e.message || e);
                         return;
                     } finally {
                         this.loading = false;

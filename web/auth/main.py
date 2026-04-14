@@ -463,6 +463,7 @@ def update_app_endpoint(
 # ── Dev-mode: serve portal HTML ──────────────────────────────────────────
 
 if DEV_MODE:
+    from web.swppp_api.main import app as _swppp_app
 
     @app.get("/")
     def portal_index():
@@ -477,3 +478,8 @@ if DEV_MODE:
         if html_path.exists():
             return FileResponse(html_path, media_type="text/html")
         return HTMLResponse("<h1>Admin page not found</h1>", status_code=500)
+
+    # Mount SWPPP sub-app last so auth routes take priority.
+    # The sub-app keeps its own middleware stack and its routes already
+    # include the /swppp/ prefix, so no path stripping is needed.
+    app.mount("", _swppp_app)

@@ -1,0 +1,40 @@
+name: Generate Invite Code
+
+on:
+  workflow_dispatch:
+    inputs:
+      display_name:
+        description: "Display name for the new user"
+        required: true
+        default: "Admin"
+      grant_admin:
+        description: "Grant admin access?"
+        type: boolean
+        default: true
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate invite via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: 143.110.229.161
+          username: root
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            sudo -u tools \
+              PYTHONPATH=/opt/tools/repo \
+              TOOLS_DATA_DIR=/opt/tools/data \
+              /opt/tools/venv/bin/python -c "
+            from web.auth.db import connect, create_invite
+            with connect() as conn:
+                code = create_invite(conn, '${{ inputs.display_name }}', ['swppp'], grant_admin=${{ inputs.grant_admin }})
+                print()
+                print('=' * 54)
+                print('  INVITE CODE GENERATED')
+                print('=' * 54)
+                print(f'  Code : {code}')
+                print(f'  Link : https://sw3p.pro/auth/login?code={code}')
+                print('=' * 54)
+            "
