@@ -64,7 +64,7 @@ app = FastAPI(title="Tools Auth Service", lifespan=_lifespan)
 async def refresh_session_cookie(request: Request, call_next):
     response = await call_next(request)
     # Don't re-stamp if the endpoint already set/deleted the cookie
-    if request.url.path in ("/auth/claim", "/auth/login", "/auth/logout"):
+    if request.url.path in ("/auth/claim", "/auth/signin", "/auth/logout"):
         return response
     token = request.cookies.get("tools_session")
     if token and 200 <= response.status_code < 400:
@@ -161,7 +161,7 @@ def logout(
     return RedirectResponse(url="/auth/login", status_code=302)
 
 
-@app.post("/auth/login")
+@app.post("/auth/signin")
 def login_password(
     body: LoginRequest,
     request: Request,

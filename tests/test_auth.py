@@ -454,7 +454,7 @@ class TestPasswordAuth:
         # Log back in with password
         c = TestClient(app, cookies={})
         r = c.post(
-            "/auth/login",
+            "/auth/signin",
             json={"display_name": "TestAdmin", "password": "TestPass123!"},
         )
         assert r.status_code == 200
@@ -477,7 +477,7 @@ class TestPasswordAuth:
 
         c2 = TestClient(app, cookies={})
         r = c2.post(
-            "/auth/login",
+            "/auth/signin",
             json={"display_name": "WrongPwUser", "password": "WrongPassword"},
         )
         assert r.status_code == 401
@@ -485,7 +485,7 @@ class TestPasswordAuth:
     def test_login_nonexistent_user(self):
         c = TestClient(app, cookies={})
         r = c.post(
-            "/auth/login",
+            "/auth/signin",
             json={"display_name": "NoSuchUser", "password": "whatever"},
         )
         assert r.status_code == 401
@@ -500,7 +500,7 @@ class TestPasswordAuth:
 
         c2 = TestClient(app, cookies={})
         r = c2.post(
-            "/auth/login",
+            "/auth/signin",
             json={"display_name": "NoPwUser", "password": "anything"},
         )
         assert r.status_code == 401
@@ -515,7 +515,7 @@ class TestPasswordAuth:
 
         c2 = TestClient(app, cookies={})
         r = c2.post(
-            "/auth/login",
+            "/auth/signin",
             json={"display_name": "casetestuser", "password": "MyPassword8"},
         )
         assert r.status_code == 200
@@ -543,14 +543,14 @@ class TestPasswordAuth:
         # Old password no longer works
         c2 = TestClient(app, cookies={})
         r = c2.post(
-            "/auth/login",
+            "/auth/signin",
             json={"display_name": "ChangePwUser", "password": "OldPassword1"},
         )
         assert r.status_code == 401
 
         # New password works
         r = c2.post(
-            "/auth/login",
+            "/auth/signin",
             json={"display_name": "ChangePwUser", "password": "NewPassword2"},
         )
         assert r.status_code == 200
@@ -569,7 +569,7 @@ class TestPasswordAuth:
         # Password login should fail
         c2 = TestClient(app, cookies={})
         r = c2.post(
-            "/auth/login",
+            "/auth/signin",
             json={"display_name": "DeactPwUser", "password": "ValidPass1!"},
         )
         assert r.status_code == 401

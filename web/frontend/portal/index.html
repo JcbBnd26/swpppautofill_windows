@@ -46,8 +46,8 @@
             <!-- Set Password -->
             <div class="mt-10 max-w-sm mx-auto bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                 <h3 class="text-base font-semibold text-gray-800 mb-1">Password Login</h3>
-                <p class="text-sm text-gray-500 mb-4">Set a password so you can log in with your name instead of an
-                    access code.</p>
+                <p class="text-sm text-gray-500 mb-4">Set a password so you can log in as
+                    <strong x-text="user.display_name"></strong> instead of using an access code.</p>
                 <form @submit.prevent="setPassword">
                     <input type="password" x-model="newPassword" placeholder="New password (min 8 chars)"
                         autocomplete="new-password"
