@@ -14,6 +14,14 @@ LOG_DIR="/var/log/tools"
 BACKUP_DIR="/opt/tools/backups"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# ── CRITICAL: Database Safety ─────────────────────────────────────────
+# Production databases live in $DATA_DIR (/opt/tools/data), NOT in the
+# repo. The repo may contain stale .db files from development — they
+# must NEVER be copied to $DATA_DIR. The init_admin.py script handles
+# first-run database creation. Subsequent deploys rely on migrations
+# inside init_db() to update the schema.
+# ──────────────────────────────────────────────────────────────────────
+
 echo "══════════════════════════════════════════════════════════"
 echo "  Tools Platform — Deploy"
 echo "══════════════════════════════════════════════════════════"

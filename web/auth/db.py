@@ -114,22 +114,31 @@ def connect() -> Generator[sqlite3.Connection, None, None]:
 
 
 def init_db() -> None:
-    """Create all tables (idempotent)."""
+    """Create all tables and run pending migrations (idempotent)."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(DB_PATH))
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     try:
         conn.executescript(SCHEMA_SQL)
-        # Migrate existing databases: add password_hash column if missing.
-        try:
-            conn.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
-        except sqlite3.OperationalError:
-            pass  # Column already exists
+        _run_migrations(conn)
         conn.commit()
     finally:
         conn.close()
     log.info("Database initialized at %s", DB_PATH)
+
+
+def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    """Check if a column exists on a table via PRAGMA table_info."""
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return any(row[1] == column for row in rows)
+
+
+def _run_migrations(conn: sqlite3.Connection) -> None:
+    """Run all pending schema migrations."""
+    if not _column_exists(conn, "users", "password_hash"):
+        conn.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
+        log.info("Migration: added password_hash column to users table")
 
 
 # ── Apps ─────────────────────────────────────────────────────────────────

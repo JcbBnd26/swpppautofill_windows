@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import tempfile
 
 import pytest
@@ -554,6 +555,79 @@ class TestPasswordAuth:
             json={"display_name": "ChangePwUser", "password": "NewPassword2"},
         )
         assert r.status_code == 200
+
+
+class TestMiddlewareCookieRefresh:
+    def test_claim_sets_fresh_cookie_not_overwritten(self):
+        with db.connect() as conn:
+            db.seed_app(conn, "swppp", "SWPPP AutoFill", "desc", "/swppp")
+            code = db.create_invite(conn, "CookieTestUser", ["swppp"])
+
+        c = TestClient(app, cookies={})
+        r = c.post("/auth/claim", json={"code": code})
+
+        assert r.status_code == 200
+        cookie_val = r.cookies.get("tools_session")
+        assert cookie_val is not None
+        assert len(cookie_val) > 0
+
+        c2 = TestClient(app, cookies={"tools_session": cookie_val})
+        me = c2.get("/auth/me")
+        assert me.status_code == 200
+
+    def test_signin_sets_fresh_cookie_not_overwritten(self):
+        with db.connect() as conn:
+            db.seed_app(conn, "swppp", "SWPPP AutoFill", "desc", "/swppp")
+            code = db.create_invite(conn, "PwCookieUser", ["swppp"])
+
+        c = TestClient(app, cookies={})
+        c.post("/auth/claim", json={"code": code})
+        c.post("/auth/set-password", json={"password": "TestPass123!"})
+
+        c2 = TestClient(app, cookies={})
+        r = c2.post(
+            "/auth/signin",
+            json={"display_name": "PwCookieUser", "password": "TestPass123!"},
+        )
+
+        assert r.status_code == 200
+        cookie_val = r.cookies.get("tools_session")
+        assert cookie_val is not None
+        assert len(cookie_val) > 0
+
+        c3 = TestClient(app, cookies={"tools_session": cookie_val})
+        me = c3.get("/auth/me")
+        assert me.status_code == 200
+
+    def test_existing_session_gets_refreshed(self):
+        admin = _admin_client()
+        original_token = admin.cookies.get("tools_session")
+
+        r = admin.get("/auth/me")
+
+        assert r.status_code == 200
+        assert r.cookies.get("tools_session") == original_token
+
+
+class TestDatabaseMigration:
+    def test_init_db_creates_password_hash_column(self):
+        db.init_db()
+        conn = sqlite3.connect(str(db.DB_PATH))
+        try:
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
+            assert "password_hash" in cols
+        finally:
+            conn.close()
+
+    def test_init_db_idempotent(self):
+        db.init_db()
+        db.init_db()
+        conn = sqlite3.connect(str(db.DB_PATH))
+        try:
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
+            assert cols.count("password_hash") == 1
+        finally:
+            conn.close()
 
     def test_deactivated_user_cannot_password_login(self):
         admin = _admin_client()

@@ -63,9 +63,15 @@ app = FastAPI(title="Tools Auth Service", lifespan=_lifespan)
 @app.middleware("http")
 async def refresh_session_cookie(request: Request, call_next):
     response = await call_next(request)
-    # Don't re-stamp if the endpoint already set/deleted the cookie
-    if request.url.path in ("/auth/claim", "/auth/signin", "/auth/logout"):
+
+    # Respect any downstream decision to set or clear the session cookie.
+    has_session_cookie = any(
+        name == b"set-cookie" and b"tools_session=" in value
+        for name, value in response.headers.raw
+    )
+    if has_session_cookie:
         return response
+
     token = request.cookies.get("tools_session")
     if token and 200 <= response.status_code < 400:
         response.set_cookie(

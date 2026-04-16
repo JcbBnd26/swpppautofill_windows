@@ -82,18 +82,25 @@
                 error: '',
                 loading: false,
 
-                init() {
-                    // If already logged in, go straight to the portal
-                    fetch('/auth/me', { credentials: 'same-origin' })
-                        .then(r => { if (r.ok) window.location.href = '/'; });
-
-                    // Pre-fill from ?code= query param — auto-switch to code tab
+                async init() {
                     const params = new URLSearchParams(window.location.search);
                     const prefill = params.get('code');
+
+                    // If arriving via invite link, skip session check.
                     if (prefill) {
                         this.mode = 'code';
                         this.code = prefill;
-                        this.submitCode();
+                        await this.submitCode();
+                        return;
+                    }
+
+                    try {
+                        const res = await fetch('/auth/me', { credentials: 'same-origin' });
+                        if (res.ok) {
+                            window.location.href = '/';
+                        }
+                    } catch {
+                        // Stay on the login page when there is no active session.
                     }
                 },
 

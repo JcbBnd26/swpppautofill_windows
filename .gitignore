@@ -15,5 +15,10 @@ __pycache__/
 # Output
 tmp_output/
 
+# Never commit development database files
+web/data/*.db
+web/data/*.db-wal
+web/data/*.db-shm
+
 # Vestigial docs
 misc_docs/

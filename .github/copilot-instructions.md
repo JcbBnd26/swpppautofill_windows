@@ -79,3 +79,105 @@ This is a Windows-first Python desktop app that generates weekly ODOT clean-wate
 - **Confirm the target before modifying.** Before making any change, explicitly state which environment (local vs. production) and which component (Tkinter vs. web, auth vs. SWPPP API) is being modified. When the user reports a bug, ask which interface they're using if it's ambiguous.
 - **Never mutate production state during diagnostics.** All production investigation must be read-only: `SELECT` queries, `GET`/`curl` requests, log reads. No `POST`, `UPDATE`, `DELETE`, or claiming invite codes during debugging — unless the user explicitly authorizes it.
 - **Errors are evidence — never discard them.** Any `catch` or `except` block that hides the original error message is a bug, not a convenience. When writing error handlers, always preserve and surface the original error. When debugging, if the user reports a generic error message, suspect the error handler before suspecting the infrastructure.
+
+## Production Deployment Protocol
+
+Use the following rules when the user wants to deploy to production or asks the agent to guide or execute a production rollout.
+
+- **Start in read-only mode.** Do not mutate production until the user explicitly approves the deploy. Use the exact approval gate `APPROVE_PROD_DEPLOY` unless the user provides a different token for the session.
+- **Do not auto-rollback.** If a deploy step fails after production has been mutated, stop, collect evidence, and wait for explicit rollback approval. Use the exact approval gate `APPROVE_PROD_ROLLBACK` unless the user provides a different token for the session.
+- **Never copy repo database files into production data.** Production databases live in `/opt/tools/data`, not in `/opt/tools/repo/web/data`. Never overwrite `/opt/tools/data/*.db` with files from the repo.
+- **Never run write SQL during diagnostics.** For production database checks, use read-only inspection such as `PRAGMA table_info(...)` and `SELECT` queries only, unless the user explicitly approves a deploy or rollback step that requires mutation.
+- **Do not use the full provision script for normal rollouts.** For code deploys, do not run `/opt/tools/repo/web/scripts/deploy.sh`. Prefer `git pull --ff-only` plus targeted service restarts.
+- **Do not use destructive git recovery commands without approval.** Do not run `git reset --hard`, force pulls, or checkout older commits unless rollback has been explicitly approved.
+- **Stop on a dirty production worktree.** If `git status --short` on the production server shows unexpected local changes, stop before deploy and report the exact files.
+- **Treat logs and command failures as evidence.** Preserve exact stderr/stdout from failed commands and include it in the report back to the user.
+
+### Production Preflight
+
+Before any production deploy, gather this read-only evidence first:
+
+- `ssh -i ~/.ssh/swppp-vps-deploy root@143.110.229.161`
+- `cd /opt/tools/repo`
+- `git status --short`
+- `systemctl status tools-auth tools-swppp --no-pager`
+- `journalctl -u tools-auth --since "1 hour ago" --no-pager | tail -40`
+- `journalctl -u tools-swppp --since "1 hour ago" --no-pager | tail -40`
+- `sqlite3 /opt/tools/data/auth.db "PRAGMA table_info(users);"`
+
+After preflight, report a compact status summary covering:
+
+- target confirmed
+- repo clean or dirty
+- auth service health
+- SWPPP service health
+- whether `password_hash` exists on `users`
+- blockers, if any
+- recommended next action: `DEPLOY` or `STOP`
+
+If blockers exist, recommend `STOP` and wait for user input.
+
+### Approved Deploy Sequence
+
+Only after explicit approval, perform production mutation in this order:
+
+1. Back up `/opt/tools/data/auth.db`
+2. Back up `/opt/tools/data/swppp_sessions.db`
+3. `cd /opt/tools/repo`
+4. `git pull --ff-only`
+5. `systemctl restart tools-auth tools-swppp`
+
+Run one step at a time and inspect the result before continuing. If any step fails, stop immediately and report the failure.
+
+After deploy, report:
+
+- backup status
+- pull status
+- auth restart status
+- SWPPP restart status
+- created backup filenames
+- current `HEAD` commit
+- next action: `VERIFY` or `STOP`
+
+If a failure occurred after production was mutated, say whether rollback is recommended and why, then wait for explicit rollback approval.
+
+### Post-Deploy Verification
+
+After a successful deploy, verify with:
+
+- `systemctl status tools-auth tools-swppp --no-pager`
+- `journalctl -u tools-auth --since "5 min ago" --no-pager | tail -80`
+- `journalctl -u tools-swppp --since "5 min ago" --no-pager | tail -80`
+- `sqlite3 /opt/tools/data/auth.db "PRAGMA table_info(users);"`
+- `curl -I https://sw3p.pro/auth/login`
+- `curl -I https://sw3p.pro/`
+
+Do not assume the migration failed just because no migration log line appears. If `password_hash` already existed, the migration is correctly a no-op. The authoritative schema check is `PRAGMA table_info(users)`.
+
+If browser access is unavailable, mark these as manual smoke tests rather than claiming they were completed:
+
+- logged-out visit to `https://sw3p.pro/auth/login`
+- logged-in visit to `https://sw3p.pro/auth/login` redirects to `/`
+- valid invite link with `?code=` claims and redirects cleanly
+- password login succeeds and session persists after redirect
+
+### Rollback Protocol
+
+Only after explicit rollback approval:
+
+- identify the backup filenames created in this deploy session
+- identify the last known good commit with `git log --oneline -5`
+- restore the database backup only if the failure requires DB restore
+- check out the approved previous commit
+- restart `tools-auth` and `tools-swppp`
+- rerun the same verification checks used post-deploy
+
+Do not invent a rollback target. If the correct commit is ambiguous, stop and ask the user to confirm it.
+
+### Required Reporting Style
+
+- Be concise and operational.
+- Do not skip approval gates.
+- Do not continue after a failed required step.
+- Do not claim success without evidence.
+- When production browser tests cannot be run from the current environment, explicitly mark them as manual follow-up.
