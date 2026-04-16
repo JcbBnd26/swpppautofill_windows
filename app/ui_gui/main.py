@@ -523,6 +523,26 @@ class App(tk.Tk):
         self.rain_station_combo.grid(row=rr, column=0, sticky="w", pady=(0, 3))
         rr += 1
 
+        # Expandable station map
+        self._map_toggle_text = tk.StringVar(value="\u25b6 Station Map")
+        self._map_toggle_btn = ttk.Button(
+            self._rain_section_frame,
+            textvariable=self._map_toggle_text,
+            command=self._toggle_station_map,
+        )
+        self._map_toggle_btn.grid(row=rr, column=0, sticky="w", pady=(2, 0))
+        rr += 1
+
+        self._map_frame = ttk.Frame(self._rain_section_frame)
+        self._map_frame.grid(row=rr, column=0, sticky="w", pady=(2, 0))
+        map_path = _bundle_path("assets/mesonet_map.png")
+        if map_path.exists():
+            self._map_photo_full = tk.PhotoImage(file=str(map_path))
+            self._map_photo = self._map_photo_full.subsample(2, 2)
+            ttk.Label(self._map_frame, image=self._map_photo).pack()
+        self._map_frame.grid_remove()
+        rr += 1
+
         # Rain days detail list (hidden until data available)
         self._rain_days_detail_label = ttk.Label(
             self._rain_section_frame,
@@ -554,6 +574,15 @@ class App(tk.Tk):
             wraplength=400,
             anchor="w",
         ).grid(row=rr, column=0, sticky="w", pady=(4, 0))
+
+    def _toggle_station_map(self) -> None:
+        """Show/hide the Mesonet station map image."""
+        if self._map_frame.winfo_manager():
+            self._map_frame.grid_remove()
+            self._map_toggle_text.set("\u25b6 Station Map")
+        else:
+            self._map_frame.grid()
+            self._map_toggle_text.set("\u25bc Station Map")
 
         # -- Project Fields --
         proj_header = ttk.Frame(left)

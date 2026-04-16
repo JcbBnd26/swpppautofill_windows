@@ -1,14 +1,14 @@
 # Implementation Record — Hardening Fixes (Tier 2)
 
-**Project**: sw3p.pro — Company Tools Portal  
-**Scope**: Prevent next-round bugs — deduplicate shared code, add server-side auth gate, clean up copy-paste artifacts  
-**Priority**: HIGH — not causing active bugs, but creates security gaps and maintenance debt  
-**Depends on**: Tier 1 (Login Bug Fixes) must be deployed first  
-**Server**: DigitalOcean VPS (Ubuntu 24.04 LTS), domain `sw3p.pro`  
-**SSH**: `ssh -i ~/.ssh/swppp-vps-deploy root@{server_ip}`  
-**Repo on server**: `/opt/tools/repo`  
-**Production data**: `/opt/tools/data` (NEVER overwrite database files)  
-**Services**: `tools-auth` (port 8001), `tools-swppp` (port 8002)  
+**Project**: sw3p.pro — Company Tools Portal
+**Scope**: Prevent next-round bugs — deduplicate shared code, add server-side auth gate, clean up copy-paste artifacts
+**Priority**: HIGH — not causing active bugs, but creates security gaps and maintenance debt
+**Depends on**: Tier 1 (Login Bug Fixes) must be deployed first
+**Server**: DigitalOcean VPS (Ubuntu 24.04 LTS), domain `sw3p.pro`
+**SSH**: `ssh -i ~/.ssh/swppp-vps-deploy root@{server_ip}`
+**Repo on server**: `/opt/tools/repo`
+**Production data**: `/opt/tools/data` (NEVER overwrite database files)
+**Services**: `tools-auth` (port 8001), `tools-swppp` (port 8002)
 
 ---
 

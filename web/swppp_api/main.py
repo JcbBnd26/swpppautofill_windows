@@ -458,6 +458,13 @@ SWPPP_FRONTEND_DIR = PROJECT_ROOT / "web" / "frontend" / "swppp"
 
 if DEV_MODE:
 
+    @app.get("/swppp/mesonet_map.png")
+    def swppp_map_image():
+        img_path = SWPPP_FRONTEND_DIR / "mesonet_map.png"
+        if img_path.exists():
+            return FileResponse(img_path, media_type="image/png")
+        return HTMLResponse("<h1>Map image not found</h1>", status_code=404)
+
     @app.get("/swppp/")
     def swppp_index():
         html_path = SWPPP_FRONTEND_DIR / "index.html"
