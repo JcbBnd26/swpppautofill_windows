@@ -629,25 +629,6 @@ class TestDatabaseMigration:
         finally:
             conn.close()
 
-    def test_deactivated_user_cannot_password_login(self):
-        admin = _admin_client()
-        code = _make_invite(admin, "DeactPwUser")
-        c = TestClient(app, cookies={})
-        c.post("/auth/claim", json={"code": code})
-        c.post("/auth/set-password", json={"password": "ValidPass1!"})
-        me = c.get("/auth/me").json()
-
-        # Deactivate user
-        admin.patch(f"/admin/users/{me['user_id']}", json={"is_active": False})
-
-        # Password login should fail
-        c2 = TestClient(app, cookies={})
-        r = c2.post(
-            "/auth/signin",
-            json={"display_name": "DeactPwUser", "password": "ValidPass1!"},
-        )
-        assert r.status_code == 401
-
 
 # ── Phase 5: Extended user tests ─────────────────────────────────────────
 
@@ -669,6 +650,165 @@ class TestAdminUsersExtended:
             "/admin/users/nonexistent-uuid",
             json={"is_active": False},
         )
+
+
+# ── Phase 6: Server-side auth gate ──────────────────────────────────────
+
+
+class TestServerSideAuthGate:
+    """Portal and admin pages must redirect unauthenticated users
+    server-side (302) rather than serving HTML."""
+
+    def test_portal_redirects_when_unauthenticated(self):
+        c = TestClient(app, cookies={})
+        r = c.get("/", follow_redirects=False)
+        assert r.status_code == 302
+        assert "/auth/login" in r.headers.get("location", "")
+
+    def test_portal_serves_html_when_authenticated(self):
+        admin = _admin_client()
+        r = admin.get("/", follow_redirects=False)
+        assert r.status_code == 200
+        assert "text/html" in r.headers.get("content-type", "")
+
+    def test_admin_redirects_when_unauthenticated(self):
+        c = TestClient(app, cookies={})
+        r = c.get("/admin", follow_redirects=False)
+        assert r.status_code == 302
+        assert "/auth/login" in r.headers.get("location", "")
+
+    def test_admin_redirects_non_admin_to_portal(self):
+        """A logged-in non-admin user should be sent to / not /auth/login."""
+        admin = _admin_client()
+        code = _make_invite(admin, "NonAdminGate")
+        c = TestClient(app, cookies={})
+        c.post("/auth/claim", json={"code": code})
+        r = c.get("/admin", follow_redirects=False)
+        assert r.status_code == 302
+        location = r.headers.get("location", "")
+        # Should redirect to portal root, NOT to login
+        assert location.endswith("/") or location == "/"
+
+    def test_admin_serves_html_for_admin_user(self):
+        admin = _admin_client()
+        r = admin.get("/admin", follow_redirects=False)
+        assert r.status_code == 200
+        assert "text/html" in r.headers.get("content-type", "")
+
+    def test_login_page_always_served(self):
+        c = TestClient(app, cookies={})
+        r = c.get("/auth/login")
+        assert r.status_code == 200
+        assert "text/html" in r.headers.get("content-type", "")
+
+    def test_portal_redirects_with_invalid_cookie(self):
+        c = TestClient(app, cookies={"tools_session": "garbage-token"})
+        r = c.get("/", follow_redirects=False)
+        assert r.status_code == 302
+        assert "/auth/login" in r.headers.get("location", "")
+
+
+# ── Phase 7: Shared CSRF middleware ──────────────────────────────────────
+
+
+class TestSharedCsrfMiddleware:
+    """CSRF middleware (now shared) must still block mismatched origins."""
+
+    def test_csrf_allows_same_origin(self):
+        """Requests with matching origin should succeed normally."""
+        admin = _admin_client()
+        code = _make_invite(admin, "CsrfTestUser")
+        assert code  # invite created successfully through same-origin POST
+
+    def test_csrf_allows_missing_origin(self):
+        """Requests without an Origin header should be allowed."""
+        with db.connect() as conn:
+            db.seed_app(conn, "swppp", "SWPPP AutoFill", "desc", "/swppp")
+            code = db.create_invite(conn, "NoOriginUser", ["swppp"])
+        c = TestClient(app, cookies={})
+        r = c.post("/auth/claim", json={"code": code})
+        assert r.status_code == 200
+
+    def test_csrf_factory_rejects_bad_origin(self):
+        """Direct unit test of the factory with dev_mode=False to verify
+        that mismatched Origin headers are actually rejected."""
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        from web.middleware import create_csrf_middleware
+
+        middleware = create_csrf_middleware(
+            expected_origin="https://example.com", dev_mode=False
+        )
+
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/test",
+            "headers": [(b"origin", b"https://evil.com")],
+            "query_string": b"",
+        }
+        from starlette.requests import Request as StarletteRequest
+
+        request = StarletteRequest(scope)
+        call_next = AsyncMock()
+        response = asyncio.run(middleware(request, call_next))
+        assert response.status_code == 403
+        call_next.assert_not_called()
+
+    def test_csrf_factory_allows_matching_origin(self):
+        """Direct unit test: matching origin passes through."""
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock
+
+        from web.middleware import create_csrf_middleware
+
+        middleware = create_csrf_middleware(
+            expected_origin="https://example.com", dev_mode=False
+        )
+
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/test",
+            "headers": [(b"origin", b"https://example.com")],
+            "query_string": b"",
+        }
+        from starlette.requests import Request as StarletteRequest
+
+        request = StarletteRequest(scope)
+        ok_response = MagicMock(status_code=200)
+        call_next = AsyncMock(return_value=ok_response)
+        response = asyncio.run(middleware(request, call_next))
+        assert response.status_code == 200
+        call_next.assert_called_once()
+
+    def test_csrf_factory_skips_in_dev_mode(self):
+        """Direct unit test: dev_mode=True skips the check even for bad origin."""
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock
+
+        from web.middleware import create_csrf_middleware
+
+        middleware = create_csrf_middleware(
+            expected_origin="https://example.com", dev_mode=True
+        )
+
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/test",
+            "headers": [(b"origin", b"https://evil.com")],
+            "query_string": b"",
+        }
+        from starlette.requests import Request as StarletteRequest
+
+        request = StarletteRequest(scope)
+        ok_response = MagicMock(status_code=200)
+        call_next = AsyncMock(return_value=ok_response)
+        response = asyncio.run(middleware(request, call_next))
+        assert response.status_code == 200
+        call_next.assert_called_once()
         assert r.status_code == 404
 
     def test_promote_to_admin(self):

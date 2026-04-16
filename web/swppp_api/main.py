@@ -71,28 +71,14 @@ _require_swppp = require_app("swppp")
 
 # ── Middleware: CSRF origin check ────────────────────────────────────────
 
-_UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+from web.middleware import create_csrf_middleware
+
+_csrf_check = create_csrf_middleware(expected_origin=BASE_URL, dev_mode=DEV_MODE)
 
 
 @app.middleware("http")
 async def csrf_origin_check(request: Request, call_next):
-    if request.method in _UNSAFE_METHODS:
-        origin = request.headers.get("origin")
-        if origin and not DEV_MODE:
-            expected = BASE_URL.rstrip("/")
-            if not origin.rstrip("/") == expected:
-                log.warning(
-                    "CSRF origin mismatch: expected=%s got=%s path=%s",
-                    expected,
-                    origin,
-                    request.url.path,
-                )
-                return Response(
-                    content='{"detail":"Origin mismatch"}',
-                    status_code=403,
-                    media_type="application/json",
-                )
-    return await call_next(request)
+    return await _csrf_check(request, call_next)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -468,7 +454,6 @@ def generate_pdf(
 
 # ── Dev-mode: serve SWPPP frontend ──────────────────────────────────────
 
-DEV_MODE = os.environ.get("TOOLS_DEV_MODE", "0") == "1"
 SWPPP_FRONTEND_DIR = PROJECT_ROOT / "web" / "frontend" / "swppp"
 
 if DEV_MODE:

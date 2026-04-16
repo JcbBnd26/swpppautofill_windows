@@ -88,28 +88,14 @@ async def refresh_session_cookie(request: Request, call_next):
 
 # ── Middleware: CSRF origin check ────────────────────────────────────────
 
-_UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+from web.middleware import create_csrf_middleware
+
+_csrf_check = create_csrf_middleware(expected_origin=BASE_URL, dev_mode=DEV_MODE)
 
 
 @app.middleware("http")
 async def csrf_origin_check(request: Request, call_next):
-    if request.method in _UNSAFE_METHODS:
-        origin = request.headers.get("origin")
-        if origin and not DEV_MODE:
-            expected = BASE_URL.rstrip("/")
-            if not origin.rstrip("/") == expected:
-                log.warning(
-                    "CSRF origin mismatch: expected=%s got=%s path=%s",
-                    expected,
-                    origin,
-                    request.url.path,
-                )
-                return Response(
-                    content='{"detail":"Origin mismatch"}',
-                    status_code=403,
-                    media_type="application/json",
-                )
-    return await call_next(request)
+    return await _csrf_check(request, call_next)
 
 
 # ── Public Endpoints ─────────────────────────────────────────────────────
@@ -510,24 +496,57 @@ def update_app_endpoint(
     return SuccessResponse()
 
 
-# ── Dev-mode: serve portal HTML ──────────────────────────────────────────
+# ── Portal Pages (server-side auth gate) ─────────────────────────────────
+#
+# These routes check the session cookie server-side and either serve the
+# HTML or redirect to /auth/login.  This prevents unauthenticated users
+# from seeing the page source and eliminates the "Loading..." flash.
+#
+# NOTE: We do NOT use the get_current_user dependency here because it
+# raises HTTPException(401) on failure, which returns JSON.  For page
+# routes we need a 302 redirect instead, so we check the cookie manually.
+
+
+@app.get("/")
+def portal_index(
+    request: Request,
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    token = request.cookies.get("tools_session")
+    if not token:
+        return RedirectResponse(url="/auth/login", status_code=302)
+    user = db.validate_session(conn, token)
+    if not user:
+        return RedirectResponse(url="/auth/login", status_code=302)
+    html_path = FRONTEND_DIR / "index.html"
+    if html_path.exists():
+        return FileResponse(html_path, media_type="text/html")
+    return HTMLResponse("<h1>Portal not found</h1>", status_code=500)
+
+
+@app.get("/admin")
+def admin_page(
+    request: Request,
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    token = request.cookies.get("tools_session")
+    if not token:
+        return RedirectResponse(url="/auth/login", status_code=302)
+    user = db.validate_session(conn, token)
+    if not user:
+        return RedirectResponse(url="/auth/login", status_code=302)
+    if not user.get("is_admin"):
+        return RedirectResponse(url="/", status_code=302)
+    html_path = FRONTEND_DIR / "admin.html"
+    if html_path.exists():
+        return FileResponse(html_path, media_type="text/html")
+    return HTMLResponse("<h1>Admin page not found</h1>", status_code=500)
+
+
+# ── Dev-mode: mount SWPPP sub-app ────────────────────────────────────────
 
 if DEV_MODE:
     from web.swppp_api.main import app as _swppp_app
-
-    @app.get("/")
-    def portal_index():
-        html_path = FRONTEND_DIR / "index.html"
-        if html_path.exists():
-            return FileResponse(html_path, media_type="text/html")
-        return HTMLResponse("<h1>Portal not found</h1>", status_code=500)
-
-    @app.get("/admin")
-    def admin_page():
-        html_path = FRONTEND_DIR / "admin.html"
-        if html_path.exists():
-            return FileResponse(html_path, media_type="text/html")
-        return HTMLResponse("<h1>Admin page not found</h1>", status_code=500)
 
     # Mount SWPPP sub-app last so auth routes take priority.
     # The sub-app keeps its own middleware stack and its routes already
