@@ -234,6 +234,12 @@ def generate_invite_code() -> str:
     return f"TOOLS-{part1}-{part2}"
 
 
+def generate_password() -> str:
+    """Generate a readable 12-char password: XXXX-XXXX-XXXX (SAFE_CHARS)."""
+    parts = ["".join(secrets.choice(SAFE_CHARS) for _ in range(4)) for _ in range(3)]
+    return "-".join(parts)
+
+
 def create_invite(
     conn: sqlite3.Connection,
     display_name: str,

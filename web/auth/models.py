@@ -72,6 +72,24 @@ class PatchUserRequest(BaseModel):
     is_admin: bool | None = None
 
 
+class CreateUserRequest(BaseModel):
+    display_name: str = Field(max_length=200)
+    app_permissions: list[str] = Field(max_length=20)
+    is_admin: bool = False
+
+
+class CreateUserResponse(BaseModel):
+    user_id: str
+    display_name: str
+    password: str
+
+
+class ResetPasswordResponse(BaseModel):
+    user_id: str
+    display_name: str
+    password: str
+
+
 # ── Admin: Sessions ──────────────────────────────────────────────────────
 
 

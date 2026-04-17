@@ -1093,3 +1093,113 @@ class TestAuthDependencies:
         # Now the admin's own cookie is invalid
         r = admin.get("/auth/me")
         assert r.status_code == 401
+
+
+# -- Admin: Create User + Reset Password --
+
+
+class TestAdminCreateUser:
+    def test_create_user_returns_password(self):
+        admin = _admin_client()
+        r = admin.post(
+            "/admin/users",
+            json={"display_name": "NewPwUser", "app_permissions": ["swppp"]},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["display_name"] == "NewPwUser"
+        assert len(data["password"]) >= 12
+        assert data["user_id"]
+
+    def test_created_user_can_login_with_password(self):
+        admin = _admin_client()
+        data = admin.post(
+            "/admin/users",
+            json={"display_name": "LoginPwUser", "app_permissions": ["swppp"]},
+        ).json()
+        c = TestClient(app, cookies={})
+        r = c.post(
+            "/auth/signin",
+            json={"display_name": "LoginPwUser", "password": data["password"]},
+        )
+        assert r.status_code == 200
+        me = c.get("/auth/me").json()
+        assert me["display_name"] == "LoginPwUser"
+        assert me["is_admin"] is False
+        assert any(a["id"] == "swppp" for a in me["apps"])
+
+    def test_create_user_admin_flag(self):
+        admin = _admin_client()
+        data = admin.post(
+            "/admin/users",
+            json={
+                "display_name": "NewAdmin",
+                "app_permissions": ["swppp"],
+                "is_admin": True,
+            },
+        ).json()
+        c = TestClient(app, cookies={})
+        c.post(
+            "/auth/signin",
+            json={"display_name": "NewAdmin", "password": data["password"]},
+        )
+        assert c.get("/auth/me").json()["is_admin"] is True
+
+    def test_create_user_duplicate_name(self):
+        admin = _admin_client()
+        admin.post(
+            "/admin/users", json={"display_name": "DupPw", "app_permissions": ["swppp"]}
+        )
+        r = admin.post(
+            "/admin/users", json={"display_name": "duppw", "app_permissions": ["swppp"]}
+        )
+        assert r.status_code == 400
+
+    def test_create_user_requires_apps(self):
+        admin = _admin_client()
+        r = admin.post(
+            "/admin/users", json={"display_name": "NoApps", "app_permissions": []}
+        )
+        assert r.status_code == 400
+
+    def test_create_user_requires_admin(self):
+        with db.connect() as conn:
+            db.seed_app(conn, "swppp", "SWPPP AutoFill", "desc", "/swppp")
+            code = db.create_invite(conn, "NotAdmin", ["swppp"])
+        c = TestClient(app, cookies={})
+        c.post("/auth/claim", json={"code": code})
+        r = c.post(
+            "/admin/users", json={"display_name": "Foo", "app_permissions": ["swppp"]}
+        )
+        assert r.status_code == 403
+
+    def test_reset_password_changes_password(self):
+        admin = _admin_client()
+        created = admin.post(
+            "/admin/users",
+            json={"display_name": "ResetMe", "app_permissions": ["swppp"]},
+        ).json()
+        old_pw = created["password"]
+        uid = created["user_id"]
+        r = admin.post(f"/admin/users/{uid}/reset-password")
+        assert r.status_code == 200
+        new_pw = r.json()["password"]
+        assert new_pw != old_pw
+        c = TestClient(app, cookies={})
+        assert (
+            c.post(
+                "/auth/signin", json={"display_name": "ResetMe", "password": old_pw}
+            ).status_code
+            == 401
+        )
+        assert (
+            c.post(
+                "/auth/signin", json={"display_name": "ResetMe", "password": new_pw}
+            ).status_code
+            == 200
+        )
+
+    def test_reset_password_user_not_found(self):
+        admin = _admin_client()
+        r = admin.post("/admin/users/nonexistent-uuid/reset-password")
+        assert r.status_code == 404

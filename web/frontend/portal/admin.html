@@ -65,6 +65,62 @@
                 </div>
             </section>
 
+            <!-- ── Section A2: Create User with Password ───────────── -->
+            <section class="bg-white rounded-xl shadow-sm border p-6">
+                <h2 class="text-lg font-semibold text-gray-800 mb-4">Create User with Password</h2>
+                <p class="text-xs text-gray-500 mb-4">
+                    Creates a user account directly with an auto-generated password — no invite code needed.
+                    The password is shown once; copy it before closing.
+                </p>
+                <div class="flex flex-wrap gap-4 items-end">
+                    <div class="flex-1 min-w-[200px]">
+                        <label class="block text-sm text-gray-600 mb-1">Name</label>
+                        <input type="text" x-model="newUser.name" placeholder="e.g. Jane D."
+                            class="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-600 mb-1">Apps</label>
+                        <div class="flex gap-3">
+                            <template x-for="a in allApps" :key="a.id">
+                                <label class="flex items-center gap-1 text-sm">
+                                    <input type="checkbox" :value="a.id" x-model="newUser.apps" />
+                                    <span x-text="a.name"></span>
+                                </label>
+                            </template>
+                        </div>
+                    </div>
+                    <label class="flex items-center gap-1 text-sm">
+                        <input type="checkbox" x-model="newUser.isAdmin" />
+                        <span>Admin</span>
+                    </label>
+                    <button @click="createUser()" :disabled="!newUser.name.trim() || newUser.apps.length === 0"
+                        class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg transition disabled:opacity-50">Create
+                        User</button>
+                </div>
+            </section>
+
+            <!-- ── Modal: New Password ─────────────────────────────── -->
+            <div x-show="modal === 'password'" class="fixed inset-0 bg-black/30 flex items-center justify-center z-50"
+                @click.self="modal = null">
+                <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-md">
+                    <h3 class="font-semibold mb-3 text-gray-800" x-text="pwInfo.title"></h3>
+                    <p class="text-sm text-gray-600 mb-2">
+                        Name: <span class="font-medium" x-text="pwInfo.name"></span>
+                    </p>
+                    <p class="text-xs text-red-600 mb-3">
+                        This password is shown only once. Copy it now.
+                    </p>
+                    <div class="flex items-center gap-3 bg-gray-50 border rounded-lg p-3 mb-4">
+                        <code class="text-lg font-mono font-bold text-gray-900 flex-1" x-text="pwInfo.password"></code>
+                        <button @click="copyText(pwInfo.password)"
+                            class="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded">Copy</button>
+                    </div>
+                    <button @click="modal = null"
+                        class="w-full text-sm text-gray-600 hover:text-gray-800 border border-gray-300 rounded-lg py-2">I've
+                        copied it — close</button>
+                </div>
+            </div>
+
             <!-- ── Section B: Pending Invites ──────────────────────── -->
             <section class="bg-white rounded-xl shadow-sm border p-6">
                 <h2 class="text-lg font-semibold text-gray-800 mb-4">Pending Invites</h2>
@@ -133,6 +189,8 @@
                                         class="text-xs text-blue-600 hover:underline">Apps</button>
                                     <button @click="viewSessions(u)"
                                         class="text-xs text-gray-600 hover:underline">Sessions</button>
+                                    <button @click="resetPassword(u)"
+                                        class="text-xs text-purple-600 hover:underline">Reset PW</button>
                                 </td>
                             </tr>
                         </template>
@@ -196,6 +254,8 @@
                 invite: { name: '', apps: [] },
                 generatedCode: '',
                 generatedLink: '',
+                newUser: { name: '', apps: [], isAdmin: false },
+                pwInfo: { title: '', name: '', password: '' },
                 modal: null,
                 modalUser: {},
                 modalSessions: [],
@@ -243,6 +303,33 @@
                     if (!confirm('Cancel this invite?')) return;
                     await this.api(`/admin/invites/${encodeURIComponent(code)}`, 'DELETE');
                     await this.refresh();
+                },
+
+                async createUser() {
+                    const data = await this.api('/admin/users', 'POST', {
+                        display_name: this.newUser.name.trim(),
+                        app_permissions: this.newUser.apps,
+                        is_admin: this.newUser.isAdmin,
+                    });
+                    this.pwInfo = {
+                        title: 'User created — new password',
+                        name: data.display_name,
+                        password: data.password,
+                    };
+                    this.modal = 'password';
+                    this.newUser = { name: '', apps: [], isAdmin: false };
+                    await this.refresh();
+                },
+
+                async resetPassword(u) {
+                    if (!confirm(`Reset password for ${u.display_name}? Any existing password will stop working.`)) return;
+                    const data = await this.api(`/admin/users/${u.id}/reset-password`, 'POST');
+                    this.pwInfo = {
+                        title: 'Password reset — new password',
+                        name: data.display_name,
+                        password: data.password,
+                    };
+                    this.modal = 'password';
                 },
 
                 async toggleUserActive(u) {

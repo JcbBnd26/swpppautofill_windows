@@ -21,6 +21,8 @@ from web.auth.models import (
     AppListResponse,
     ClaimRequest,
     ClaimResponse,
+    CreateUserRequest,
+    CreateUserResponse,
     DeleteSessionsResponse,
     GrantAppRequest,
     InviteCreateRequest,
@@ -32,6 +34,7 @@ from web.auth.models import (
     MeResponse,
     PatchAppRequest,
     PatchUserRequest,
+    ResetPasswordResponse,
     SessionInfo,
     SessionListResponse,
     SetPasswordRequest,
@@ -286,6 +289,64 @@ def update_user_endpoint(
             admin["id"],
         )
     return SuccessResponse()
+
+
+@app.post("/admin/users")
+def create_user_endpoint(
+    body: CreateUserRequest,
+    _admin: dict[str, Any] = Depends(require_admin),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    name = body.display_name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Display name is required")
+    if not body.app_permissions:
+        raise HTTPException(status_code=400, detail="At least one app must be selected")
+    for aid in body.app_permissions:
+        if not db.get_app(conn, aid):
+            raise HTTPException(status_code=400, detail=f"Unknown app: {aid}")
+    existing = conn.execute(
+        "SELECT 1 FROM users WHERE display_name = ? COLLATE NOCASE LIMIT 1",
+        (name,),
+    ).fetchone()
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"A user named '{name}' already exists",
+        )
+    user_id = db.create_user(conn, name, is_admin=body.is_admin)
+    for aid in body.app_permissions:
+        db.grant_app_access(conn, user_id, aid)
+    password = db.generate_password()
+    db.set_user_password(conn, user_id, password)
+    log.info(
+        "User created by admin: user_id=%s name=%s is_admin=%s apps=%s by admin=%s",
+        user_id,
+        name,
+        body.is_admin,
+        body.app_permissions,
+        _admin["id"],
+    )
+    return CreateUserResponse(user_id=user_id, display_name=name, password=password)
+
+
+@app.post("/admin/users/{user_id}/reset-password")
+def reset_user_password(
+    user_id: str,
+    _admin: dict[str, Any] = Depends(require_admin),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    user = db.get_user(conn, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    password = db.generate_password()
+    db.set_user_password(conn, user_id, password)
+    log.info("Password reset by admin: user_id=%s by admin=%s", user_id, _admin["id"])
+    return ResetPasswordResponse(
+        user_id=user_id,
+        display_name=user["display_name"],
+        password=password,
+    )
 
 
 # ── Admin: Sessions ──────────────────────────────────────────────────────
