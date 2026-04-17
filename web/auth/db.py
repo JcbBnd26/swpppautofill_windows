@@ -134,11 +134,41 @@ def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
     return any(row[1] == column for row in rows)
 
 
+def _index_exists(conn: sqlite3.Connection, index_name: str) -> bool:
+    """Check if an index exists by name."""
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name=?",
+        (index_name,),
+    ).fetchone()
+    return row is not None
+
+
 def _run_migrations(conn: sqlite3.Connection) -> None:
     """Run all pending schema migrations."""
+    # Migration 1: Add password_hash column to users table.
     if not _column_exists(conn, "users", "password_hash"):
         conn.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
         log.info("Migration: added password_hash column to users table")
+
+    # Migration 2: Enforce case-insensitive uniqueness on users.display_name.
+    if not _index_exists(conn, "ux_users_display_name_nocase"):
+        dupes = conn.execute(
+            "SELECT LOWER(display_name) AS n, COUNT(*) AS c FROM users "
+            "GROUP BY n HAVING c > 1"
+        ).fetchall()
+        if dupes:
+            names = ", ".join(f"{d['n']} (x{d['c']})" for d in dupes)
+            raise RuntimeError(
+                f"Cannot enforce unique display_name: duplicates exist: {names}. "
+                f"Resolve manually before redeploying."
+            )
+        conn.execute(
+            "CREATE UNIQUE INDEX ux_users_display_name_nocase "
+            "ON users(display_name COLLATE NOCASE)"
+        )
+        log.info(
+            "Migration: created unique index on users(display_name COLLATE NOCASE)"
+        )
 
 
 # ── Apps ─────────────────────────────────────────────────────────────────
@@ -343,6 +373,26 @@ def set_user_password(conn: sqlite3.Connection, user_id: str, password: str) -> 
         "UPDATE users SET password_hash = ? WHERE id = ?",
         (_hash_password(password), user_id),
     )
+
+
+def user_has_password(conn: sqlite3.Connection, user_id: str) -> bool:
+    """Return True if *user_id* has a password_hash set (i.e. not NULL)."""
+    row = conn.execute(
+        "SELECT password_hash FROM users WHERE id = ?", (user_id,)
+    ).fetchone()
+    if not row:
+        return False
+    return bool(row["password_hash"])
+
+
+def verify_user_password(conn: sqlite3.Connection, user_id: str, password: str) -> bool:
+    """Verify *password* against the stored hash for *user_id*."""
+    row = conn.execute(
+        "SELECT password_hash FROM users WHERE id = ?", (user_id,)
+    ).fetchone()
+    if not row or not row["password_hash"]:
+        return False
+    return _verify_password(password, row["password_hash"])
 
 
 def authenticate_user(

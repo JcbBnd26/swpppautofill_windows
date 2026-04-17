@@ -59,6 +59,10 @@
                     <strong x-text="user.display_name"></strong> instead of using an access code.
                 </p>
                 <form @submit.prevent="setPassword">
+                    <input type="password" x-show="needsCurrent" x-model="currentPassword"
+                        placeholder="Current password" autocomplete="current-password"
+                        class="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        :disabled="pwLoading" />
                     <input type="password" x-model="newPassword" placeholder="New password (min 8 chars)"
                         autocomplete="new-password"
                         class="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -82,6 +86,8 @@
                 user: { display_name: '', is_admin: false, apps: [] },
                 showSettings: false,
                 newPassword: '',
+                currentPassword: '',
+                needsCurrent: false,
                 pwLoading: false,
                 pwError: '',
                 pwSuccess: false,
@@ -107,18 +113,29 @@
                     this.pwError = '';
                     this.pwSuccess = false;
                     this.pwLoading = true;
+                    const body = { password: this.newPassword };
+                    if (this.needsCurrent) body.current_password = this.currentPassword;
                     try {
                         const res = await fetch('/auth/set-password', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             credentials: 'same-origin',
-                            body: JSON.stringify({ password: this.newPassword }),
+                            body: JSON.stringify(body),
                         });
                         if (res.ok) {
                             this.pwSuccess = true;
                             this.newPassword = '';
+                            this.currentPassword = '';
+                            this.needsCurrent = false;
+                            return;
+                        }
+                        const data = await res.json();
+                        if (res.status === 400 && (data.detail || '').includes('Current password')) {
+                            this.needsCurrent = true;
+                            this.pwError = 'Enter your current password to change it.';
+                        } else if (res.status === 401) {
+                            this.pwError = 'Current password is incorrect.';
                         } else {
-                            const data = await res.json();
                             this.pwError = data.detail || 'Failed to set password';
                         }
                     } catch {

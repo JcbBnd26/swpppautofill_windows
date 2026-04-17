@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import tempfile
 from contextlib import asynccontextmanager
@@ -83,6 +84,8 @@ async def csrf_origin_check(request: Request, call_next):
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
+_SESSION_NAME_RE = re.compile(r"^[A-Za-z0-9 _\-.]{1,200}$")
+
 
 def _cleanup_dir(path: str) -> None:
     try:
@@ -92,10 +95,20 @@ def _cleanup_dir(path: str) -> None:
 
 
 def _validate_session_name(name: str) -> None:
+    if not name:
+        raise HTTPException(status_code=400, detail="Session name is required")
     if len(name) > MAX_SESSION_NAME:
         raise HTTPException(
             status_code=400,
             detail=f"Session name too long (max {MAX_SESSION_NAME} chars)",
+        )
+    if not _SESSION_NAME_RE.match(name):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Session name may contain only letters, numbers, spaces, "
+                "underscores, hyphens, and periods"
+            ),
         )
 
 

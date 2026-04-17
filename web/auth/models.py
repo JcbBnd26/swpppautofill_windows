@@ -33,6 +33,7 @@ class LoginResponse(BaseModel):
 
 class SetPasswordRequest(BaseModel):
     password: str = Field(min_length=8, max_length=200)
+    current_password: str | None = Field(default=None, max_length=200)
 
 
 class AppInfo(BaseModel):

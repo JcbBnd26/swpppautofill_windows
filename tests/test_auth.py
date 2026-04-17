@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import sqlite3
@@ -23,12 +24,16 @@ client = TestClient(app, cookies={})
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
+_seq = itertools.count(1)
+
 
 def _admin_client() -> TestClient:
     """Create an admin user via the DB and return an authenticated TestClient."""
     with db.connect() as conn:
         db.seed_app(conn, "swppp", "SWPPP AutoFill", "Generate ODOT PDFs", "/swppp")
-        code = db.create_invite(conn, "TestAdmin", ["swppp"], grant_admin=True)
+        code = db.create_invite(
+            conn, f"TestAdmin{next(_seq)}", ["swppp"], grant_admin=True
+        )
     c = TestClient(app, cookies={})
     r = c.post("/auth/claim", json={"code": code})
     assert r.status_code == 200
@@ -164,7 +169,7 @@ class TestMe:
         r = admin.get("/auth/me")
         assert r.status_code == 200
         data = r.json()
-        assert data["display_name"] == "TestAdmin"
+        assert data["display_name"].startswith("TestAdmin")
         assert data["is_admin"] is True
         assert any(a["id"] == "swppp" for a in data["apps"])
 
@@ -445,6 +450,10 @@ class TestAdminInvitesExtended:
 class TestPasswordAuth:
     def test_set_and_login_with_password(self):
         admin = _admin_client()
+        # Get the dynamic admin name
+        me_r = admin.get("/auth/me")
+        admin_name = me_r.json()["display_name"]
+
         # Set a password on the admin account
         r = admin.post("/auth/set-password", json={"password": "TestPass123!"})
         assert r.status_code == 200
@@ -456,7 +465,7 @@ class TestPasswordAuth:
         c = TestClient(app, cookies={})
         r = c.post(
             "/auth/signin",
-            json={"display_name": "TestAdmin", "password": "TestPass123!"},
+            json={"display_name": admin_name, "password": "TestPass123!"},
         )
         assert r.status_code == 200
         assert r.json()["success"] is True
@@ -465,7 +474,7 @@ class TestPasswordAuth:
         # Verify session is valid
         me = c.get("/auth/me")
         assert me.status_code == 200
-        assert me.json()["display_name"] == "TestAdmin"
+        assert me.json()["display_name"] == admin_name
 
     def test_login_wrong_password(self):
         # Create a user with a password
@@ -539,7 +548,10 @@ class TestPasswordAuth:
         c = TestClient(app, cookies={})
         c.post("/auth/claim", json={"code": code})
         c.post("/auth/set-password", json={"password": "OldPassword1"})
-        c.post("/auth/set-password", json={"password": "NewPassword2"})
+        c.post(
+            "/auth/set-password",
+            json={"password": "NewPassword2", "current_password": "OldPassword1"},
+        )
 
         # Old password no longer works
         c2 = TestClient(app, cookies={})
@@ -630,6 +642,122 @@ class TestDatabaseMigration:
             conn.close()
 
 
+class TestSetPasswordCurrentCheck:
+    def test_first_time_set_does_not_require_current(self):
+        """A user who has never set a password can set one without proof."""
+        admin = _admin_client()
+        code = _make_invite(admin, "FirstTimerSetPw")
+        c = TestClient(app, cookies={})
+        c.post("/auth/claim", json={"code": code})
+        r = c.post("/auth/set-password", json={"password": "FirstPass123"})
+        assert r.status_code == 200
+
+    def test_change_requires_current(self):
+        """Once a password is set, changing it without current_password fails."""
+        admin = _admin_client()
+        code = _make_invite(admin, "ChangeRequiresCurrent")
+        c = TestClient(app, cookies={})
+        c.post("/auth/claim", json={"code": code})
+        c.post("/auth/set-password", json={"password": "FirstPass123"})
+        r = c.post("/auth/set-password", json={"password": "NewPass456!"})
+        assert r.status_code == 400
+        assert "Current password" in r.json()["detail"]
+
+    def test_change_with_wrong_current_rejected(self):
+        admin = _admin_client()
+        code = _make_invite(admin, "WrongCurrentPw")
+        c = TestClient(app, cookies={})
+        c.post("/auth/claim", json={"code": code})
+        c.post("/auth/set-password", json={"password": "FirstPass123"})
+        r = c.post(
+            "/auth/set-password",
+            json={"password": "NewPass456!", "current_password": "WrongOne!!"},
+        )
+        assert r.status_code == 401
+
+    def test_change_with_correct_current_succeeds(self):
+        admin = _admin_client()
+        code = _make_invite(admin, "CorrectCurrentPw")
+        c = TestClient(app, cookies={})
+        c.post("/auth/claim", json={"code": code})
+        c.post("/auth/set-password", json={"password": "FirstPass123"})
+        r = c.post(
+            "/auth/set-password",
+            json={"password": "NewPass456!", "current_password": "FirstPass123"},
+        )
+        assert r.status_code == 200
+
+    def test_old_password_no_longer_works_after_change(self):
+        """After a successful change, the old password must fail at /auth/signin."""
+        admin = _admin_client()
+        code = _make_invite(admin, "OldPwDies")
+        c = TestClient(app, cookies={})
+        c.post("/auth/claim", json={"code": code})
+        c.post("/auth/set-password", json={"password": "FirstPass123"})
+        c.post(
+            "/auth/set-password",
+            json={"password": "NewPass456!", "current_password": "FirstPass123"},
+        )
+        c2 = TestClient(app, cookies={})
+        r = c2.post(
+            "/auth/signin",
+            json={"display_name": "OldPwDies", "password": "FirstPass123"},
+        )
+        assert r.status_code == 401
+
+
+class TestDisplayNameUniqueness:
+    def test_index_exists(self):
+        with db.connect() as conn:
+            row = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index' "
+                "AND name='ux_users_display_name_nocase'"
+            ).fetchone()
+            assert row is not None
+
+    def test_create_invite_rejects_duplicate_user_name(self):
+        admin = _admin_client()
+        code = _make_invite(admin, "ActualUser1")
+        c = TestClient(app, cookies={})
+        c.post("/auth/claim", json={"code": code})
+        r = admin.post(
+            "/admin/invites",
+            json={"display_name": "ActualUser1", "app_permissions": ["swppp"]},
+        )
+        assert r.status_code == 400
+        assert "already exists" in r.json()["detail"].lower()
+
+    def test_create_invite_rejects_case_insensitive_duplicate(self):
+        admin = _admin_client()
+        code = _make_invite(admin, "CaseSensitive1")
+        c = TestClient(app, cookies={})
+        c.post("/auth/claim", json={"code": code})
+        r = admin.post(
+            "/admin/invites",
+            json={"display_name": "CASESENSITIVE1", "app_permissions": ["swppp"]},
+        )
+        assert r.status_code == 400
+
+    def test_create_invite_rejects_duplicate_pending_invite(self):
+        admin = _admin_client()
+        _make_invite(admin, "PendingDupe")
+        r = admin.post(
+            "/admin/invites",
+            json={"display_name": "PendingDupe", "app_permissions": ["swppp"]},
+        )
+        assert r.status_code == 400
+        assert "pending" in r.json()["detail"].lower()
+
+    def test_db_index_rejects_direct_duplicate_insert(self):
+        """Even direct DB inserts must be rejected by the unique index."""
+        import sqlite3 as sq
+
+        with db.connect() as conn:
+            db.create_user(conn, "DirectDupe")
+            with pytest.raises(sq.IntegrityError):
+                db.create_user(conn, "DirectDupe")
+
+
 # ── Phase 5: Extended user tests ─────────────────────────────────────────
 
 
@@ -650,6 +778,30 @@ class TestAdminUsersExtended:
             "/admin/users/nonexistent-uuid",
             json={"is_active": False},
         )
+
+    def test_promote_to_admin(self):
+        admin = _admin_client()
+        code = _make_invite(admin, "PromoteMe")
+        c = TestClient(app, cookies={})
+        c.post("/auth/claim", json={"code": code})
+        me = c.get("/auth/me").json()
+        assert me["is_admin"] is False
+
+        r = admin.patch(f"/admin/users/{me['user_id']}", json={"is_admin": True})
+        assert r.status_code == 200
+        me2 = c.get("/auth/me").json()
+        assert me2["is_admin"] is True
+
+    def test_deactivate_already_deactivated(self):
+        admin = _admin_client()
+        code = _make_invite(admin, "DeactTwice")
+        c = TestClient(app, cookies={})
+        c.post("/auth/claim", json={"code": code})
+        me = c.get("/auth/me").json()
+
+        admin.patch(f"/admin/users/{me['user_id']}", json={"is_active": False})
+        r = admin.patch(f"/admin/users/{me['user_id']}", json={"is_active": False})
+        assert r.status_code == 200
 
 
 # ── Phase 6: Server-side auth gate ──────────────────────────────────────
@@ -809,30 +961,6 @@ class TestSharedCsrfMiddleware:
         response = asyncio.run(middleware(request, call_next))
         assert response.status_code == 200
         call_next.assert_called_once()
-
-    def test_promote_to_admin(self):
-        admin = _admin_client()
-        code = _make_invite(admin, "PromoteMe")
-        c = TestClient(app, cookies={})
-        c.post("/auth/claim", json={"code": code})
-        me = c.get("/auth/me").json()
-        assert me["is_admin"] is False
-
-        r = admin.patch(f"/admin/users/{me['user_id']}", json={"is_admin": True})
-        assert r.status_code == 200
-        me2 = c.get("/auth/me").json()
-        assert me2["is_admin"] is True
-
-    def test_deactivate_already_deactivated(self):
-        admin = _admin_client()
-        code = _make_invite(admin, "DeactTwice")
-        c = TestClient(app, cookies={})
-        c.post("/auth/claim", json={"code": code})
-        me = c.get("/auth/me").json()
-
-        admin.patch(f"/admin/users/{me['user_id']}", json={"is_active": False})
-        r = admin.patch(f"/admin/users/{me['user_id']}", json={"is_active": False})
-        assert r.status_code == 200
 
 
 # ── Phase 5: Extended session tests ──────────────────────────────────────

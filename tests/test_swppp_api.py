@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import tempfile
@@ -27,6 +28,8 @@ auth_client = TestClient(auth_app, cookies={})
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
+_seq = itertools.count(1)
+
 
 def _authed_client() -> TestClient:
     """Create a user with swppp access and return an authenticated TestClient
@@ -37,7 +40,9 @@ def _authed_client() -> TestClient:
         auth_db.seed_app(
             conn, "swppp", "SWPPP AutoFill", "Generate ODOT PDFs", "/swppp"
         )
-        code = auth_db.create_invite(conn, "TestUser", ["swppp"], grant_admin=False)
+        code = auth_db.create_invite(
+            conn, f"TestUser{next(_seq)}", ["swppp"], grant_admin=False
+        )
 
     # Claim the invite on the auth app to get a session cookie
     r = auth_client.post("/auth/claim", json={"code": code})
@@ -55,7 +60,9 @@ def _no_access_client() -> TestClient:
     with auth_db.connect() as conn:
         # Create a different app so the user has something, just not swppp
         auth_db.seed_app(conn, "other", "Other App", "desc", "/other")
-        code = auth_db.create_invite(conn, "NoAccess", ["other"], grant_admin=False)
+        code = auth_db.create_invite(
+            conn, f"NoAccess{next(_seq)}", ["other"], grant_admin=False
+        )
 
     r = auth_client.post("/auth/claim", json={"code": code})
     assert r.status_code == 200
@@ -581,6 +588,36 @@ class TestGenerateExtended:
         assert r.status_code == 422
 
 
+# ── Session name validation ──────────────────────────────────────────────
+
+
+class TestSessionNameValidation:
+    def test_reject_illegal_characters(self):
+        c = _authed_client()
+        r = c.put(
+            "/swppp/api/sessions/has<something>",
+            json={"foo": "bar"},
+        )
+        assert r.status_code == 400
+
+    def test_reject_slash_in_name(self):
+        c = _authed_client()
+        r = c.put(
+            "/swppp/api/sessions/has%2Fslash",
+            json={"foo": "bar"},
+        )
+        assert r.status_code in (400, 404)
+
+    def test_accept_typical_names(self):
+        c = _authed_client()
+        for name in ["project_2026-04", "Site.A.1", "My Session 7"]:
+            r = c.put(
+                f"/swppp/api/sessions/{name}",
+                json={"foo": "bar"},
+            )
+            assert r.status_code == 200, f"rejected valid name: {name}"
+
+
 # ── Session CRUD (extended) ──────────────────────────────────────────────
 
 
@@ -606,7 +643,8 @@ class TestSessionCRUDExtended:
 
     def test_save_special_chars_in_name(self):
         c = _authed_client()
-        r = c.put("/swppp/api/sessions/my%20session%21", json={"data": "test"})
+        # Spaces, hyphens, underscores, dots are allowed
+        r = c.put("/swppp/api/sessions/my%20session_v1.2-final", json={"data": "test"})
         assert r.status_code == 200
 
     def test_delete_nonexistent_session(self):

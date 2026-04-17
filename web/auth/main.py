@@ -186,11 +186,28 @@ def login_password(
 @app.post("/auth/set-password")
 def set_password(
     body: SetPasswordRequest,
+    request: Request,
     user: dict[str, Any] = Depends(get_current_user),
     conn: sqlite3.Connection = Depends(db.get_db),
 ):
+    if db.user_has_password(conn, user["id"]):
+        if not body.current_password:
+            log.warning(
+                "Set-password without current_password: user_id=%s ip=%s",
+                user["id"],
+                request.client.host if request.client else "unknown",
+            )
+            raise HTTPException(status_code=400, detail="Current password is required")
+        if not db.verify_user_password(conn, user["id"], body.current_password):
+            log.warning(
+                "Set-password with wrong current_password: user_id=%s ip=%s",
+                user["id"],
+                request.client.host if request.client else "unknown",
+            )
+            raise HTTPException(status_code=401, detail="Current password is incorrect")
+
     db.set_user_password(conn, user["id"], body.password)
-    log.info("Password set: user_id=%s", user["id"])
+    log.info("Password changed: user_id=%s", user["id"])
     return SuccessResponse()
 
 
@@ -332,6 +349,25 @@ def create_invite(
     for aid in body.app_permissions:
         if not db.get_app(conn, aid):
             raise HTTPException(status_code=400, detail=f"Unknown app: {aid}")
+    existing = conn.execute(
+        "SELECT 1 FROM users WHERE display_name = ? COLLATE NOCASE LIMIT 1",
+        (body.display_name.strip(),),
+    ).fetchone()
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"A user named '{body.display_name.strip()}' already exists",
+        )
+    existing_invite = conn.execute(
+        "SELECT 1 FROM invite_codes "
+        "WHERE display_name = ? COLLATE NOCASE AND status = 'pending' LIMIT 1",
+        (body.display_name.strip(),),
+    ).fetchone()
+    if existing_invite:
+        raise HTTPException(
+            status_code=400,
+            detail=f"A pending invite for '{body.display_name.strip()}' already exists",
+        )
     code = db.create_invite(conn, body.display_name.strip(), body.app_permissions)
     log.info(
         "Invite created: code=%s name=%s apps=%s by admin=%s",
