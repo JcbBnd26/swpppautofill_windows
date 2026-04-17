@@ -25,6 +25,12 @@ fields:
   inspection_type:
     label: "Type of Inspection"
     pdf_field_name: "Type of Inspection"
+  inspected_by:
+    label: "Inspected by"
+    pdf_field_name: "Inspected by"
+  reviewed_by:
+    label: "Reviewed by"
+    pdf_field_name: "Reviewed by"
 
 date_fields:
   - label: "Date"

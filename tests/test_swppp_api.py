@@ -90,7 +90,7 @@ class TestFormSchema:
 
         assert "fields" in data
         assert "checkbox_groups" in data
-        assert len(data["fields"]) == 8
+        assert len(data["fields"]) == 10
         assert len(data["checkbox_groups"]) == 7
 
     def test_checkbox_group_structure(self):
