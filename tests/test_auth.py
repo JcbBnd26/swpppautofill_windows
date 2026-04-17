@@ -809,7 +809,6 @@ class TestSharedCsrfMiddleware:
         response = asyncio.run(middleware(request, call_next))
         assert response.status_code == 200
         call_next.assert_called_once()
-        assert r.status_code == 404
 
     def test_promote_to_admin(self):
         admin = _admin_client()
