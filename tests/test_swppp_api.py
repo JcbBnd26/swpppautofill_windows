@@ -248,7 +248,8 @@ class TestGenerate:
             "end_date": "2025-01-06",  # end before start
         }
         r = c.post("/swppp/api/generate", json=payload)
-        assert r.status_code == 400
+        # Pydantic validation returns 422, not 400
+        assert r.status_code == 422
 
     def test_generate_with_checkboxes(self):
         c = _authed_client()
@@ -356,7 +357,8 @@ class TestRainFetch:
                 "end_date": "2025-01-07",
             },
         )
-        assert r.status_code == 400
+        # Pydantic validation returns 422, not 400
+        assert r.status_code == 422
 
     def test_rain_fetch_end_before_start(self):
         c = _authed_client()
@@ -369,8 +371,8 @@ class TestRainFetch:
                     "end_date": "2025-01-01",
                 },
             )
-        assert r.status_code == 400
-        assert "precede" in r.json()["detail"].lower()
+        # Pydantic validation returns 422, not 400
+        assert r.status_code == 422
 
     def test_rain_fetch_negative_threshold(self):
         c = _authed_client()
@@ -709,6 +711,278 @@ class TestSessionCRUDExtended:
         r2 = c.get("/swppp/api/sessions/round-trip")
         assert r2.status_code == 200
         assert r2.json()["job_piece"] == "JP-999"
+
+
+# ── Validation test coverage (Tier 6 Fix 6A) ────────────────────────────
+
+
+class TestGenerateRequestValidation:
+    """Verify GenerateRequest model validators reject bad input."""
+
+    def test_invalid_start_date_rejected(self):
+        c = _authed_client()
+        response = c.post(
+            "/swppp/api/generate",
+            json={
+                "project_fields": {},
+                "start_date": "not-a-date",
+                "end_date": "2024-12-31",
+            },
+        )
+        assert response.status_code == 422
+        assert (
+            "start_date" in response.text.lower()
+            or "valid iso" in response.text.lower()
+        )
+
+    def test_end_before_start_rejected(self):
+        c = _authed_client()
+        response = c.post(
+            "/swppp/api/generate",
+            json={
+                "project_fields": {},
+                "start_date": "2024-12-31",
+                "end_date": "2024-01-01",
+            },
+        )
+        assert response.status_code == 422
+
+    def test_range_exceeding_365_days_rejected(self):
+        c = _authed_client()
+        response = c.post(
+            "/swppp/api/generate",
+            json={
+                "project_fields": {},
+                "start_date": "2020-01-01",
+                "end_date": "2025-01-01",  # 5 years
+            },
+        )
+        assert response.status_code == 422
+        assert "365" in response.text
+
+    def test_exactly_365_days_accepted(self):
+        """Boundary: exactly at the cap must be accepted."""
+        c = _authed_client()
+        response = c.post(
+            "/swppp/api/generate",
+            json={
+                "project_fields": {},
+                "start_date": "2024-01-01",
+                "end_date": "2024-12-31",  # 365 days
+            },
+        )
+        # May return 500 if PDF generation fails in test env, but NOT 422
+        assert response.status_code != 422
+
+    def test_rain_days_over_limit_rejected(self):
+        """More than 500 rain_days items must be rejected."""
+        c = _authed_client()
+        rain_days = [{"date": "2024-01-01", "rainfall_inches": 0.5}] * 501
+        response = c.post(
+            "/swppp/api/generate",
+            json={
+                "project_fields": {},
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-07",
+                "rain_days": rain_days,
+            },
+        )
+        assert response.status_code == 422
+
+    def test_project_field_value_too_long_rejected(self):
+        c = _authed_client()
+        response = c.post(
+            "/swppp/api/generate",
+            json={
+                "project_fields": {"job_piece": "x" * 501},
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-07",
+            },
+        )
+        assert response.status_code == 422
+
+
+class TestRainFetchValidation:
+    """Verify RainFetchRequest model validators reject bad input."""
+
+    def test_invalid_date_format_rejected(self):
+        c = _authed_client()
+        response = c.post(
+            "/swppp/api/rain/fetch",
+            json={
+                "station": "NRMN",
+                "start_date": "01/01/2024",  # MM/DD/YYYY not ISO
+                "end_date": "2024-12-31",
+            },
+        )
+        assert response.status_code == 422
+
+    def test_range_over_730_days_rejected(self):
+        c = _authed_client()
+        response = c.post(
+            "/swppp/api/rain/fetch",
+            json={
+                "station": "NRMN",
+                "start_date": "2020-01-01",
+                "end_date": "2025-01-01",
+            },
+        )
+        assert response.status_code == 422
+        assert "730" in response.text
+
+
+# ── Failure path test coverage (Tier 6 Fix 6B) ──────────────────────────
+
+
+class TestRainFetchFailurePaths:
+    """Verify rain fetch endpoint handles external API failures gracefully."""
+
+    def test_mesonet_completely_unavailable_returns_502(self, monkeypatch):
+        """When fetch_rainfall itself raises, endpoint must return 502, not 500."""
+        import requests
+
+        from app.core import mesonet as _mesonet
+
+        def _fail(*args, **kwargs):
+            raise requests.ConnectionError("simulated: Mesonet service down")
+
+        monkeypatch.setattr(_mesonet, "fetch_rainfall", _fail)
+
+        c = _authed_client()
+        response = c.post(
+            "/swppp/api/rain/fetch",
+            json={
+                "station": "NRMN",
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-03",
+            },
+        )
+
+        assert response.status_code == 502
+        assert "Rain data fetch failed" in response.json()["detail"]
+
+    def test_mesonet_timeout_returns_502(self, monkeypatch):
+        """A timeout in fetch_rainfall must result in 502, not an unhandled exception."""
+        import requests
+
+        from app.core import mesonet as _mesonet
+
+        def _timeout(*args, **kwargs):
+            raise requests.Timeout("timeout")
+
+        monkeypatch.setattr(_mesonet, "fetch_rainfall", _timeout)
+
+        c = _authed_client()
+        response = c.post(
+            "/swppp/api/rain/fetch",
+            json={
+                "station": "NRMN",
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-02",
+            },
+        )
+
+        assert response.status_code == 502
+
+    def test_partial_failure_still_returns_200_with_counts(self, monkeypatch):
+        """Partial Mesonet failures must return 200 with failed_days > 0, not an error."""
+        from app.core import mesonet as _mesonet
+        from app.core.mesonet import FetchResult
+
+        monkeypatch.setattr(
+            _mesonet,
+            "fetch_rainfall",
+            lambda *a, **kw: FetchResult(days=[], failed=2, missing=1),
+        )
+
+        c = _authed_client()
+        response = c.post(
+            "/swppp/api/rain/fetch",
+            json={
+                "station": "NRMN",
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-03",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["failed_days"] == 2
+        assert data["missing_days"] == 1
+        assert data["all_days"] == []
+
+
+class TestGenerateFailurePaths:
+    """Verify generate endpoint handles PDF generation failures gracefully."""
+
+    def test_generate_batch_empty_returns_500(self, monkeypatch):
+        """When generate_batch returns an empty list, endpoint must return 500."""
+        from app.core import fill as _fill
+
+        monkeypatch.setattr(_fill, "generate_batch", lambda **kw: [])
+
+        c = _authed_client()
+        response = c.post(
+            "/swppp/api/generate",
+            json={
+                "project_fields": {"job_piece": "Test"},
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-07",
+            },
+        )
+
+        assert response.status_code == 500
+        assert "No PDFs were generated" in response.json()["detail"]
+
+    def test_generate_batch_raises_returns_500(self, monkeypatch):
+        """An exception in generate_batch must produce a 500, not an unhandled crash."""
+        from app.core import fill as _fill
+
+        def _raise(**kw):
+            raise RuntimeError("simulated fill error")
+
+        monkeypatch.setattr(_fill, "generate_batch", _raise)
+
+        c = _authed_client()
+        response = c.post(
+            "/swppp/api/generate",
+            json={
+                "project_fields": {},
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-07",
+            },
+        )
+
+        assert response.status_code == 500
+        assert "PDF generation failed" in response.json()["detail"]
+
+    def test_zip_bundle_failure_returns_500(self, monkeypatch):
+        """A failure in bundle_outputs_zip must return 500, not crash."""
+        from app.core import fill as _fill
+
+        # generate_batch returns a non-empty list so we reach the zip step
+        monkeypatch.setattr(_fill, "generate_batch", lambda **kw: ["fake.pdf"])
+
+        def _zip_fail(*a, **kw):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(_fill, "bundle_outputs_zip", _zip_fail)
+
+        c = _authed_client()
+        response = c.post(
+            "/swppp/api/generate",
+            json={
+                "project_fields": {},
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-07",
+            },
+        )
+
+        assert response.status_code == 500
+        assert (
+            "ZIP" in response.json()["detail"]
+            or "bundle" in response.json()["detail"].lower()
+        )
 
 
 # ── Dev-mode routes ──────────────────────────────────────────────────────

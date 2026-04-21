@@ -42,19 +42,15 @@ from web.auth.models import (
     UserInfo,
     UserListResponse,
 )
+from web.log_config import configure_logging
 
 # ── Logging configuration ─────────────────────────────────────────────
-# Must be called before any logger is used. Reads TOOLS_LOG_LEVEL from
-# the environment so dev (DEBUG) and prod (INFO) can differ without
-# code changes. basicConfig() is a no-op if the root logger already has
-# handlers — safe to call in both services.
+# JSON-formatted logs for automated tooling (Tier 6 Fix 6C).
+# Reads TOOLS_LOG_LEVEL from environment so dev (DEBUG) and prod (INFO)
+# can differ without code changes.
 
-_LOG_LEVEL = os.environ.get("TOOLS_LOG_LEVEL", "INFO").upper()
-logging.basicConfig(
-    level=_LOG_LEVEL,
-    format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
-    datefmt="%Y-%m-%dT%H:%M:%S",
-)
+_LOG_LEVEL = os.environ.get("TOOLS_LOG_LEVEL", "INFO")
+configure_logging(_LOG_LEVEL)
 
 log = logging.getLogger(__name__)
 
