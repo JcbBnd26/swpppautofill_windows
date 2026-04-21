@@ -8,7 +8,7 @@ import secrets
 import sqlite3
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Generator
 
@@ -24,6 +24,9 @@ DB_PATH = DATA_DIR / "auth.db"
 
 # Invite-code alphabet: A-Z + 0-9, minus ambiguous O/0/I/1
 SAFE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+# Session lifetime: 90-day sliding window
+SESSION_LIFETIME_DAYS = 90
 
 SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS apps (
@@ -68,7 +71,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     user_id      TEXT NOT NULL REFERENCES users(id),
     device_label TEXT,
     created_at   TEXT NOT NULL,
-    last_seen_at TEXT NOT NULL
+    last_seen_at TEXT NOT NULL,
+    expires_at   TEXT NOT NULL
 );
 """
 
@@ -170,6 +174,18 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
         log.info(
             "Migration: created unique index on users(display_name COLLATE NOCASE)"
         )
+
+    # Migration 3: Add expires_at column to sessions table.
+    if not _column_exists(conn, "sessions", "expires_at"):
+        conn.execute("ALTER TABLE sessions ADD COLUMN expires_at TEXT")
+        # Populate existing sessions: extend from last_seen_at by SESSION_LIFETIME_DAYS.
+        # This gives active sessions a fair runway rather than expiring them immediately.
+        conn.execute(
+            "UPDATE sessions SET expires_at = "
+            "datetime(last_seen_at, '+90 days') "
+            "WHERE expires_at IS NULL"
+        )
+        log.info("Migration 3: added expires_at column to sessions table")
 
 
 # ── Apps ─────────────────────────────────────────────────────────────────
@@ -436,29 +452,39 @@ def create_session(
 ) -> str:
     token = secrets.token_hex(32)
     now = _now()
+    expires_at = (
+        datetime.now(timezone.utc) + timedelta(days=SESSION_LIFETIME_DAYS)
+    ).isoformat()
     conn.execute(
-        "INSERT INTO sessions (token, user_id, device_label, created_at, last_seen_at) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (token, user_id, device_label, now, now),
+        "INSERT INTO sessions "
+        "(token, user_id, device_label, created_at, last_seen_at, expires_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (token, user_id, device_label, now, now, expires_at),
     )
     return token
 
 
 def validate_session(conn: sqlite3.Connection, token: str) -> dict[str, Any] | None:
     """Look up session → active user.  Returns user dict with app list, or None."""
+    now = _now()
     row = conn.execute(
         "SELECT u.id, u.display_name, u.is_active, u.is_admin "
         "FROM sessions s JOIN users u ON s.user_id = u.id "
-        "WHERE s.token = ?",
-        (token,),
+        "WHERE s.token = ? AND (s.expires_at IS NULL OR s.expires_at > ?)",
+        (token, now),
     ).fetchone()
     if not row:
         return None
     user = dict(row)
     if not user["is_active"]:
         return None
-    now = _now()
-    conn.execute("UPDATE sessions SET last_seen_at = ? WHERE token = ?", (now, token))
+    new_expires_at = (
+        datetime.now(timezone.utc) + timedelta(days=SESSION_LIFETIME_DAYS)
+    ).isoformat()
+    conn.execute(
+        "UPDATE sessions SET last_seen_at = ?, expires_at = ? WHERE token = ?",
+        (now, new_expires_at, token),
+    )
     conn.execute("UPDATE users SET last_seen_at = ? WHERE id = ?", (now, user["id"]))
     user["apps"] = get_user_apps(conn, user["id"])
     return user
@@ -484,6 +510,25 @@ def get_user_sessions(conn: sqlite3.Connection, user_id: str) -> list[dict[str, 
 
 def delete_user_sessions(conn: sqlite3.Connection, user_id: str) -> int:
     cur = conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+    return cur.rowcount
+
+
+def delete_sessions_except(
+    conn: sqlite3.Connection,
+    user_id: str,
+    exclude_token: str,
+) -> int:
+    """Delete all sessions for user_id except the one matching exclude_token.
+
+    Used when a user changes their own password: their current session
+    stays alive so they are not immediately logged out, but all other
+    sessions (e.g., on other devices, or stolen sessions) are revoked.
+    Returns the count of deleted sessions.
+    """
+    cur = conn.execute(
+        "DELETE FROM sessions WHERE user_id = ? AND token != ?",
+        (user_id, exclude_token),
+    )
     return cur.rowcount
 
 

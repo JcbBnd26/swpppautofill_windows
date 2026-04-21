@@ -118,19 +118,17 @@ def _fetch_rain_mm_at(station: str, utc_day: date, utc_time: str) -> float | Non
         "type": "mdf",
         "format": "csv",
     }
-    last_exc: requests.RequestException | None = None
     for attempt in range(_MAX_RETRIES + 1):
         try:
             resp = requests.get(MDF_EXPORT_URL, params=params, timeout=REQUEST_TIMEOUT)
             resp.raise_for_status()
             break
         except requests.RequestException as exc:
-            last_exc = exc
             if attempt < _MAX_RETRIES:
                 log.debug("Retry %d for %s %s: %s", attempt + 1, utc_day, utc_time, exc)
                 time.sleep(_RETRY_DELAY)
-    else:
-        raise last_exc  # type: ignore[misc]
+            else:
+                raise
 
     reader = csv.DictReader(io.StringIO(resp.text))
     target = station.upper()
@@ -263,6 +261,17 @@ def fetch_rainfall(
             missing += 1
             log.info("Missing data for %s on %s", station, day)
 
+    if failed > 0 or missing > 0:
+        log.warning(
+            "Mesonet fetch incomplete: station=%s range=%s..%s "
+            "returned=%d failed=%d missing=%d",
+            station,
+            start.isoformat(),
+            end.isoformat(),
+            len(results),
+            failed,
+            missing,
+        )
     return FetchResult(days=results, failed=failed, missing=missing)
 
 

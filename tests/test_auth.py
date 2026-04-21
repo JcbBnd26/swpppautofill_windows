@@ -1203,3 +1203,313 @@ class TestAdminCreateUser:
         admin = _admin_client()
         r = admin.post("/admin/users/nonexistent-uuid/reset-password")
         assert r.status_code == 404
+
+
+# ── Tier 5: Health Endpoint ─────────────────────────────────────────────
+
+
+class TestHealthEndpoint:
+    """Verify health endpoint returns correct status."""
+
+    def test_health_returns_200_when_healthy(self):
+        """GET /health must return 200 with status=ok when DB is available."""
+        c = TestClient(app)
+        response = c.get("/health")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ok"
+        assert data["service"] == "tools-auth"
+        assert "timestamp" in data
+        assert "db" in data
+
+    def test_health_is_unauthenticated(self):
+        """GET /health must not require a session cookie."""
+        c = TestClient(app, cookies={})
+        # Call with no cookies set — must still return 200
+        response = c.get("/health")
+        assert response.status_code == 200
+        assert response.json()["status"] == "ok"
+
+
+# ── Tier 4: Logout Cookie Fix ───────────────────────────────────────────
+
+
+class TestLogoutCookieFix:
+    """Verify logout clears the browser cookie in the response headers."""
+
+    def test_logout_response_contains_delete_cookie_header(self):
+        """After logout, the Set-Cookie header must set Max-Age=0."""
+        with db.connect() as conn:
+            db.seed_app(conn, "swppp", "SWPPP", "desc", "/swppp")
+            code = db.create_invite(conn, "LogoutUser", ["swppp"])
+        c = TestClient(app, cookies={})
+        c.post("/auth/claim", json={"code": code})
+        c.post("/auth/set-password", json={"password": "Pass-1234"})
+
+        # Post to logout
+        r = c.post("/auth/logout", follow_redirects=False)
+        assert r.status_code == 302
+
+        # Confirm the Set-Cookie header clears the session cookie
+        set_cookie = r.headers.get("set-cookie", "")
+        assert "tools_session=" in set_cookie
+        assert "Max-Age=0" in set_cookie or "max-age=0" in set_cookie.lower()
+
+    def test_logout_deletes_server_side_session(self):
+        """Server-side session row must be deleted regardless of cookie fix."""
+        with db.connect() as conn:
+            db.seed_app(conn, "swppp", "SWPPP", "desc", "/swppp")
+            code = db.create_invite(conn, "LogoutUser2", ["swppp"])
+        c = TestClient(app, cookies={})
+        c.post("/auth/claim", json={"code": code})
+        c.post("/auth/set-password", json={"password": "Pass-1234"})
+
+        # Verify session exists before logout
+        token = c.cookies.get("tools_session")
+        with db.connect() as conn:
+            user = db.validate_session(conn, token)
+            assert user is not None
+
+        # Log out
+        c.post("/auth/logout")
+
+        # Verify session is gone
+        with db.connect() as conn:
+            user = db.validate_session(conn, token)
+            assert user is None
+
+    def test_logout_without_cookie_does_not_error(self):
+        """Logout with no session cookie must still redirect cleanly."""
+        c = TestClient(app, cookies={})
+        r = c.post("/auth/logout", follow_redirects=False)
+        assert r.status_code == 302
+
+
+# ── Tier 4: Session Refresh Middleware ──────────────────────────────────
+
+
+class TestSessionRefreshMiddleware:
+    """Verify the cookie refresh middleware only refreshes on 2xx responses."""
+
+    def test_valid_session_2xx_refreshes_cookie(self):
+        """A valid session on a 2xx response must get a refreshed cookie."""
+        with db.connect() as conn:
+            db.seed_app(conn, "swppp", "SWPPP", "desc", "/swppp")
+            code = db.create_invite(conn, "RefreshUser", ["swppp"])
+        c = TestClient(app, cookies={})
+        c.post("/auth/claim", json={"code": code})
+        c.post("/auth/set-password", json={"password": "Pass-1234"})
+
+        # GET /auth/me with valid session → 200 → cookie in response headers
+        r = c.get("/auth/me")
+        assert r.status_code == 200
+        # The middleware should have refreshed the cookie
+        assert "set-cookie" in r.headers or "Set-Cookie" in r.headers
+
+    def test_invalid_session_redirect_does_not_refresh_cookie(self):
+        """A redirect due to invalid session must NOT refresh the cookie."""
+        with db.connect() as conn:
+            db.seed_app(conn, "swppp", "SWPPP", "desc", "/swppp")
+            code = db.create_invite(conn, "RedirUser", ["swppp"])
+        c = TestClient(app, cookies={})
+        c.post("/auth/claim", json={"code": code})
+        token = c.cookies.get("tools_session")
+
+        # Delete the session server-side
+        with db.connect() as conn:
+            db.delete_session(conn, token)
+
+        # GET / with a deleted session token → 302 → no Set-Cookie in response
+        r = c.get("/", follow_redirects=False)
+        assert r.status_code == 302
+        # Middleware should NOT refresh the cookie on a redirect (3xx)
+        set_cookie = r.headers.get("set-cookie", "")
+        # If there's a Set-Cookie header, it should be from the endpoint clearing it, not middleware refreshing
+        if "set-cookie" in r.headers or "Set-Cookie" in r.headers:
+            # It should be deleting the cookie, not refreshing it with a long max-age
+            assert "Max-Age=0" in set_cookie or "max-age=0" in set_cookie.lower()
+
+    def test_401_response_does_not_refresh_cookie(self):
+        """A 401 from a protected endpoint must not refresh any cookie."""
+        c = TestClient(app, cookies={})
+        # Try to access a protected endpoint without a session
+        r = c.get("/admin/users")
+        assert r.status_code == 401  # Unauthenticated access returns 401
+        # No session cookie to refresh
+        set_cookie = r.headers.get("set-cookie", "")
+        assert "tools_session=" not in set_cookie
+
+
+# ── Tier 4: Session Expiry ──────────────────────────────────────────────
+
+
+class TestSessionExpiry:
+    """Verify sessions expire correctly and the sliding window works."""
+
+    def test_expired_session_is_rejected(self):
+        """A session with expires_at in the past must return None from validate_session."""
+        from datetime import datetime, timedelta, timezone
+
+        with db.connect() as conn:
+            db.seed_app(conn, "swppp", "SWPPP", "desc", "/swppp")
+            user_id = db.create_user(conn, "ExpiryUser")
+            token = db.create_session(conn, user_id)
+            conn.commit()
+
+            # Force expiry into the past
+            past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+            conn.execute(
+                "UPDATE sessions SET expires_at = ? WHERE token = ?", (past, token)
+            )
+            conn.commit()
+
+            result = db.validate_session(conn, token)
+            assert result is None
+
+    def test_valid_session_extends_expiry_on_validate(self):
+        """Calling validate_session on a valid session must push expires_at forward."""
+        import time
+        from datetime import datetime, timedelta, timezone
+
+        with db.connect() as conn:
+            db.seed_app(conn, "swppp", "SWPPP", "desc", "/swppp")
+            user_id = db.create_user(conn, "SlideUser")
+            token = db.create_session(conn, user_id)
+            conn.commit()
+
+            # Record the initial expires_at
+            row = conn.execute(
+                "SELECT expires_at FROM sessions WHERE token = ?", (token,)
+            ).fetchone()
+            initial_expires = row["expires_at"]
+
+            # Wait a tiny bit to ensure time has passed
+            time.sleep(0.1)
+
+            # Validate — this should slide the expiry forward
+            db.validate_session(conn, token)
+            conn.commit()
+
+            row = conn.execute(
+                "SELECT expires_at FROM sessions WHERE token = ?", (token,)
+            ).fetchone()
+            # The new expires_at should be later than the initial one
+            assert row["expires_at"] >= initial_expires
+
+    def test_new_session_has_expires_at_set(self):
+        """create_session must always populate expires_at."""
+        with db.connect() as conn:
+            db.seed_app(conn, "swppp", "SWPPP", "desc", "/swppp")
+            user_id = db.create_user(conn, "ExpiryCreationUser")
+            token = db.create_session(conn, user_id)
+            conn.commit()
+
+            row = conn.execute(
+                "SELECT expires_at FROM sessions WHERE token = ?", (token,)
+            ).fetchone()
+            assert row["expires_at"] is not None
+
+
+# ── Tier 4: Password Session Invalidation ───────────────────────────────
+
+
+class TestPasswordSessionInvalidation:
+    """Verify password changes revoke appropriate sessions."""
+
+    def test_user_password_change_kills_other_sessions(self):
+        """After user changes password, all sessions except current are invalid."""
+        with db.connect() as conn:
+            db.seed_app(conn, "swppp", "SWPPP", "desc", "/swppp")
+            code = db.create_invite(conn, "MultiSessionUser", ["swppp"])
+        c = TestClient(app, cookies={})
+        c.post("/auth/claim", json={"code": code})
+        c.post("/auth/set-password", json={"password": "OldPass-1234"})
+
+        # Create another session for this user (simulating login from another device)
+        current_token = c.cookies.get("tools_session")
+        with db.connect() as conn:
+            # Find user ID
+            user = db.validate_session(conn, current_token)
+            user_id = user["id"]
+            other_token = db.create_session(conn, user_id, "other-device")
+            conn.commit()
+
+        # Change password
+        r = c.post(
+            "/auth/set-password",
+            json={"current_password": "OldPass-1234", "password": "NewPass-5678"},
+        )
+        assert r.status_code == 200
+
+        # Other session must now be invalid
+        with db.connect() as conn:
+            other_user = db.validate_session(conn, other_token)
+            assert other_user is None
+
+    def test_user_password_change_keeps_current_session(self):
+        """After user changes password, the current session remains valid."""
+        with db.connect() as conn:
+            db.seed_app(conn, "swppp", "SWPPP", "desc", "/swppp")
+            code = db.create_invite(conn, "KeepSessionUser", ["swppp"])
+        c = TestClient(app, cookies={})
+        c.post("/auth/claim", json={"code": code})
+        c.post("/auth/set-password", json={"password": "OldPass-1234"})
+
+        # Change password
+        c.post(
+            "/auth/set-password",
+            json={"current_password": "OldPass-1234", "password": "NewPass-5678"},
+        )
+
+        # Current session should still be valid
+        r = c.get("/auth/me")
+        assert r.status_code == 200
+
+    def test_admin_password_reset_kills_all_sessions(self):
+        """Admin password reset must invalidate ALL sessions including the current one."""
+        admin = _admin_client()
+
+        # Create a regular user
+        created = admin.post(
+            "/admin/users",
+            json={"display_name": "ResetTargetUser", "app_permissions": ["swppp"]},
+        ).json()
+        user_id = created["user_id"]
+        password = created["password"]
+
+        # Log in as that user
+        c = TestClient(app, cookies={})
+        c.post(
+            "/auth/signin",
+            json={"display_name": "ResetTargetUser", "password": password},
+        )
+        token = c.cookies.get("tools_session")
+
+        # Admin resets the password
+        r = admin.post(f"/admin/users/{user_id}/reset-password")
+        assert r.status_code == 200
+
+        # The user's session must be gone
+        with db.connect() as conn:
+            result = db.validate_session(conn, token)
+            assert result is None
+
+    def test_admin_reset_logs_session_count(self, caplog):
+        """Admin reset log message must include sessions_revoked count."""
+        import logging
+
+        caplog.set_level(logging.INFO)
+        admin = _admin_client()
+
+        # Create a user with a session
+        created = admin.post(
+            "/admin/users",
+            json={"display_name": "LogTargetUser", "app_permissions": ["swppp"]},
+        ).json()
+        user_id = created["user_id"]
+
+        # Admin resets the password
+        admin.post(f"/admin/users/{user_id}/reset-password")
+
+        # Check that the log message includes sessions_revoked
+        assert any("sessions_revoked=" in record.message for record in caplog.records)

@@ -5,6 +5,7 @@
 from datetime import date
 
 import pytest
+import requests
 
 from app.core.mesonet import (
     FetchResult,
@@ -170,3 +171,45 @@ class TestFetchRainfallFailures:
         assert result.missing == 1
         assert result.failed == 0
         assert len(result.days) == 2
+
+
+def test_partial_failure_emits_warning(monkeypatch, caplog):
+    """fetch_rainfall with failed days must emit a WARNING log."""
+    import logging
+
+    from app.core import mesonet as _mod
+
+    def _fake_fetch(station, utc_day, utc_time):
+        # Simulate all requests failing
+        raise requests.RequestException("timeout")
+
+    monkeypatch.setattr(_mod, "_fetch_rain_mm_at", _fake_fetch)
+
+    with caplog.at_level(logging.WARNING, logger="app.core.mesonet"):
+        result = fetch_rainfall("NRMN", date(2024, 1, 1), date(2024, 1, 3))
+
+    assert result.failed > 0
+    assert any(
+        "Mesonet fetch incomplete" in record.message for record in caplog.records
+    )
+
+
+def test_partial_failure_with_missing_emits_warning(monkeypatch, caplog):
+    """fetch_rainfall with missing days must emit a WARNING log."""
+    import logging
+
+    from app.core import mesonet as _mod
+
+    def _fake_fetch(station, utc_day, utc_time):
+        # Return None to simulate missing data
+        return None
+
+    monkeypatch.setattr(_mod, "_fetch_rain_mm_at", _fake_fetch)
+
+    with caplog.at_level(logging.WARNING, logger="app.core.mesonet"):
+        result = fetch_rainfall("NRMN", date(2024, 1, 1), date(2024, 1, 2))
+
+    assert result.missing > 0
+    assert any(
+        "Mesonet fetch incomplete" in record.message for record in caplog.records
+    )

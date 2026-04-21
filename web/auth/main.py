@@ -43,6 +43,19 @@ from web.auth.models import (
     UserListResponse,
 )
 
+# ── Logging configuration ─────────────────────────────────────────────
+# Must be called before any logger is used. Reads TOOLS_LOG_LEVEL from
+# the environment so dev (DEBUG) and prod (INFO) can differ without
+# code changes. basicConfig() is a no-op if the root logger already has
+# handlers — safe to call in both services.
+
+_LOG_LEVEL = os.environ.get("TOOLS_LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=_LOG_LEVEL,
+    format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+)
+
 log = logging.getLogger(__name__)
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend" / "portal"
@@ -53,8 +66,11 @@ COOKIE_MAX_AGE = 90 * 24 * 60 * 60  # 90 days
 
 @asynccontextmanager
 async def _lifespan(application: FastAPI):
+    log.info("Auth service starting: dev_mode=%s base_url=%s", DEV_MODE, BASE_URL)
     db.init_db()
+    log.info("Database initialized: path=%s", db.DB_PATH)
     yield
+    log.info("Auth service shutting down")
 
 
 app = FastAPI(title="Tools Auth Service", lifespan=_lifespan)
@@ -76,7 +92,7 @@ async def refresh_session_cookie(request: Request, call_next):
         return response
 
     token = request.cookies.get("tools_session")
-    if token and 200 <= response.status_code < 400:
+    if token and 200 <= response.status_code < 300:
         response.set_cookie(
             key="tools_session",
             value=token,
@@ -146,14 +162,20 @@ def claim_code(
 @app.post("/auth/logout")
 def logout(
     request: Request,
-    response: Response,
     conn: sqlite3.Connection = Depends(db.get_db),
 ):
     token = request.cookies.get("tools_session")
     if token:
         db.delete_session(conn, token)
-    response.delete_cookie("tools_session", path="/")
-    return RedirectResponse(url="/auth/login", status_code=302)
+    redirect = RedirectResponse(url="/auth/login", status_code=302)
+    redirect.delete_cookie(
+        key="tools_session",
+        path="/",
+        httponly=True,
+        samesite="lax",
+        secure=not DEV_MODE,
+    )
+    return redirect
 
 
 @app.post("/auth/signin")
@@ -210,8 +232,41 @@ def set_password(
             raise HTTPException(status_code=401, detail="Current password is incorrect")
 
     db.set_user_password(conn, user["id"], body.password)
-    log.info("Password changed: user_id=%s", user["id"])
+
+    # Invalidate all other sessions. The current session stays alive so
+    # the user is not immediately logged out on their own device.
+    current_token = request.cookies.get("tools_session", "")
+    killed = db.delete_sessions_except(conn, user["id"], current_token)
+    log.info(
+        "Password changed: user_id=%s other_sessions_revoked=%d",
+        user["id"],
+        killed,
+    )
     return SuccessResponse()
+
+
+# ── Health Check ─────────────────────────────────────────────────────────
+
+
+@app.get("/health")
+def health_check(conn: sqlite3.Connection = Depends(db.get_db)):
+    """Unauthenticated health check. Verifies DB connectivity.
+    Returns 200 if healthy, 503 if the database is unreachable.
+    """
+    try:
+        conn.execute("SELECT 1").fetchone()
+    except Exception as exc:
+        log.error("Health check: DB connectivity failed: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Database unreachable: {exc}",
+        )
+    return {
+        "status": "ok",
+        "service": "tools-auth",
+        "db": str(db.DB_PATH),
+        "timestamp": db._now(),
+    }
 
 
 # ── Session-Required ─────────────────────────────────────────────────────
@@ -341,7 +396,17 @@ def reset_user_password(
         raise HTTPException(status_code=404, detail="User not found")
     password = db.generate_password()
     db.set_user_password(conn, user_id, password)
-    log.info("Password reset by admin: user_id=%s by admin=%s", user_id, _admin["id"])
+
+    # Kill ALL sessions for the target user.
+    # An admin-initiated reset is a security action; the user must re-authenticate
+    # on all devices with the new credential.
+    killed = db.delete_user_sessions(conn, user_id)
+    log.info(
+        "Password reset by admin: user_id=%s by admin=%s sessions_revoked=%d",
+        user_id,
+        _admin["id"],
+        killed,
+    )
     return ResetPasswordResponse(
         user_id=user_id,
         display_name=user["display_name"],

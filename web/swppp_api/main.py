@@ -41,6 +41,19 @@ from web.swppp_api.models import (
     StationListResponse,
 )
 
+# ── Logging configuration ─────────────────────────────────────────────
+# Must be called before any logger is used. Reads TOOLS_LOG_LEVEL from
+# the environment so dev (DEBUG) and prod (INFO) can differ without
+# code changes. basicConfig() is a no-op if the root logger already has
+# handlers — safe to call in both services.
+
+_LOG_LEVEL = os.environ.get("TOOLS_LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=_LOG_LEVEL,
+    format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+)
+
 log = logging.getLogger(__name__)
 
 # ── Paths relative to project root ───────────────────────────────────────
@@ -60,8 +73,28 @@ BASE_URL = os.environ.get("TOOLS_BASE_URL", "http://localhost:8001")
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
+    log.info("SWPPP service starting: dev_mode=%s base_url=%s", DEV_MODE, BASE_URL)
+
+    # Validate critical files exist before accepting requests.
+    # Fail fast with a clear message rather than failing at request time.
+    _required = {
+        "PDF template": TEMPLATE_PDF,
+        "ODOT mapping YAML": MAPPING_YAML,
+    }
+    missing = [
+        f"{label}: {path}" for label, path in _required.items() if not path.exists()
+    ]
+    if missing:
+        raise RuntimeError(
+            "SWPPP service cannot start — required files missing:\n"
+            + "\n".join(f"  {m}" for m in missing)
+        )
+    log.info("Startup check passed: template=%s mapping=%s", TEMPLATE_PDF, MAPPING_YAML)
+
     session_db.init_db()
+    log.info("Database initialized: path=%s", session_db.DB_PATH)
     yield
+    log.info("SWPPP service shutting down")
 
 
 app = FastAPI(title="SWPPP API", lifespan=lifespan)
@@ -110,6 +143,43 @@ def _validate_session_name(name: str) -> None:
                 "underscores, hyphens, and periods"
             ),
         )
+
+
+# ── GET /swppp/api/health ────────────────────────────────────────────────
+
+
+@app.get("/swppp/api/health")
+def health_check():
+    """Unauthenticated health check. Verifies DB connectivity and critical files.
+    Returns 200 if healthy, 503 if any check fails.
+    """
+    issues: list[str] = []
+
+    # Check critical files
+    for label, path in [("template", TEMPLATE_PDF), ("mapping", MAPPING_YAML)]:
+        if not path.exists():
+            issues.append(f"{label} file missing: {path}")
+
+    # Check DB connectivity
+    try:
+        with session_db.connect() as conn:
+            conn.execute("SELECT 1").fetchone()
+    except Exception as exc:
+        issues.append(f"DB unreachable: {exc}")
+
+    if issues:
+        log.error("Health check failed: %s", "; ".join(issues))
+        raise HTTPException(
+            status_code=503,
+            detail={"status": "unhealthy", "issues": issues},
+        )
+
+    return {
+        "status": "ok",
+        "service": "tools-swppp",
+        "db": str(session_db.DB_PATH),
+        "timestamp": session_db._now(),
+    }
 
 
 # ── GET /swppp/api/form-schema ───────────────────────────────────────────
@@ -194,7 +264,7 @@ def rain_fetch(req: RainFetchRequest, user: dict = Depends(_require_swppp)):
     try:
         result = fetch_rainfall(station_code, start, end)
     except Exception as exc:
-        log.error("Rain data fetch failed: %s", exc)
+        log.error("Rain data fetch failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=502, detail="Rain data fetch failed")
 
     events = filter_rain_events(result.days, threshold=req.threshold)
@@ -270,8 +340,17 @@ async def rain_parse_csv(
 
 @app.get("/swppp/api/sessions", response_model=SessionListResponse)
 def list_sessions(user: dict = Depends(_require_swppp)):
-    with session_db.connect() as conn:
-        rows = session_db.list_sessions(conn, user["id"])
+    try:
+        with session_db.connect() as conn:
+            rows = session_db.list_sessions(conn, user["id"])
+    except Exception as exc:
+        log.error(
+            "Session list failed: user_id=%s error=%s",
+            user["id"],
+            exc,
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail="Failed to retrieve sessions")
     return SessionListResponse(sessions=[SessionListItem(**r) for r in rows])
 
 
@@ -297,8 +376,18 @@ async def import_session(
     name = data.get("session_name") or Path(file.filename or "imported").stem
 
     if save:
-        with session_db.connect() as conn:
-            session_db.save_session(conn, user["id"], name, data)
+        try:
+            with session_db.connect() as conn:
+                session_db.save_session(conn, user["id"], name, data)
+        except Exception as exc:
+            log.error(
+                "Session save failed: user_id=%s name=%s error=%s",
+                user["id"],
+                name,
+                exc,
+                exc_info=True,
+            )
+            raise HTTPException(status_code=500, detail="Failed to save session")
 
     return SessionImportResponse(success=True, saved=save, name=name, data=data)
 
@@ -306,8 +395,18 @@ async def import_session(
 @app.get("/swppp/api/sessions/{name}")
 def get_session(name: str, user: dict = Depends(_require_swppp)):
     _validate_session_name(name)
-    with session_db.connect() as conn:
-        data = session_db.get_session(conn, user["id"], name)
+    try:
+        with session_db.connect() as conn:
+            data = session_db.get_session(conn, user["id"], name)
+    except Exception as exc:
+        log.error(
+            "Session get failed: user_id=%s name=%s error=%s",
+            user["id"],
+            name,
+            exc,
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail="Failed to retrieve session")
     if data is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return data
@@ -320,8 +419,18 @@ async def save_session(
     user: dict = Depends(_require_swppp),
 ):
     _validate_session_name(name)
-    with session_db.connect() as conn:
-        session_db.save_session(conn, user["id"], name, body)
+    try:
+        with session_db.connect() as conn:
+            session_db.save_session(conn, user["id"], name, body)
+    except Exception as exc:
+        log.error(
+            "Session save failed: user_id=%s name=%s error=%s",
+            user["id"],
+            name,
+            exc,
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail="Failed to save session")
     return SessionSaveResponse(success=True, name=name)
 
 
@@ -332,8 +441,18 @@ def export_session(
     user: dict = Depends(_require_swppp),
 ):
     _validate_session_name(name)
-    with session_db.connect() as conn:
-        data = session_db.get_session(conn, user["id"], name)
+    try:
+        with session_db.connect() as conn:
+            data = session_db.get_session(conn, user["id"], name)
+    except Exception as exc:
+        log.error(
+            "Session export failed: user_id=%s name=%s error=%s",
+            user["id"],
+            name,
+            exc,
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail="Failed to export session")
     if data is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -350,8 +469,19 @@ def export_session(
 @app.delete("/swppp/api/sessions/{name}")
 def delete_session(name: str, user: dict = Depends(_require_swppp)):
     _validate_session_name(name)
-    with session_db.connect() as conn:
-        session_db.delete_session(conn, user["id"], name)
+    try:
+        with session_db.connect() as conn:
+            session_db.delete_session(conn, user["id"], name)
+    except Exception as exc:
+        log.error(
+            "Session delete failed: user_id=%s name=%s error=%s",
+            user["id"],
+            name,
+            exc,
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail="Failed to delete session")
+    return {"success": True}
     return {"success": True}
 
 
@@ -414,7 +544,7 @@ def generate_pdf(
             notes_texts=req.notes_texts or None,
         )
     except Exception as exc:
-        log.error("PDF generation failed: %s", exc)
+        log.error("PDF generation failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail="PDF generation failed")
 
     if req.rain_days:
@@ -440,7 +570,7 @@ def generate_pdf(
                 original_inspection_type=req.original_inspection_type or "",
             )
         except Exception as exc:
-            log.error("Rain PDF generation failed: %s", exc)
+            log.error("Rain PDF generation failed: %s", exc, exc_info=True)
             raise HTTPException(status_code=500, detail="Rain PDF generation failed")
         created.extend(rain_created)
 
@@ -450,7 +580,7 @@ def generate_pdf(
     try:
         all_files = bundle_outputs_zip(created, Path(tmpdir))
     except Exception as exc:
-        log.error("ZIP bundling failed: %s", exc)
+        log.error("ZIP bundling failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to create ZIP bundle")
 
     zip_path = next((p for p in all_files if p.endswith(".zip")), None)

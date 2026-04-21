@@ -726,3 +726,159 @@ class TestDevRoutes:
         r = c.get("/swppp/")
         assert r.status_code == 200
         assert "alpine" in r.text.lower()
+
+
+# ── Tier 5: Health Endpoint ─────────────────────────────────────────────
+
+
+class TestSwpppHealthEndpoint:
+    """Verify SWPPP service health endpoint."""
+
+    def test_health_returns_200_when_healthy(self):
+        """GET /swppp/api/health must return 200 when all checks pass."""
+        c = TestClient(swppp_app)
+        response = c.get("/swppp/api/health")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ok"
+        assert data["service"] == "tools-swppp"
+        assert "timestamp" in data
+        assert "db" in data
+
+    def test_health_is_unauthenticated(self):
+        """GET /swppp/api/health must not require authentication."""
+        c = TestClient(swppp_app, cookies={})
+        response = c.get("/swppp/api/health")
+        assert response.status_code == 200
+
+    def test_health_fails_when_template_missing(self, monkeypatch, tmp_path):
+        """Health check must return 503 when template file is missing."""
+        import web.swppp_api.main as swppp_main
+
+        # Point TEMPLATE_PDF to a nonexistent file
+        monkeypatch.setattr(swppp_main, "TEMPLATE_PDF", tmp_path / "nonexistent.pdf")
+
+        c = TestClient(swppp_app)
+        response = c.get("/swppp/api/health")
+        assert response.status_code == 503
+        detail = response.json()["detail"]
+        assert detail["status"] == "unhealthy"
+        assert any("template" in issue.lower() for issue in detail["issues"])
+
+    def test_health_fails_when_mapping_missing(self, monkeypatch, tmp_path):
+        """Health check must return 503 when mapping file is missing."""
+        import web.swppp_api.main as swppp_main
+
+        # Point MAPPING_YAML to a nonexistent file
+        monkeypatch.setattr(swppp_main, "MAPPING_YAML", tmp_path / "nonexistent.yaml")
+
+        c = TestClient(swppp_app)
+        response = c.get("/swppp/api/health")
+        assert response.status_code == 503
+        detail = response.json()["detail"]
+        assert detail["status"] == "unhealthy"
+        assert any("mapping" in issue.lower() for issue in detail["issues"])
+
+
+# ── Tier 5: Startup Validation ──────────────────────────────────────────
+
+
+class TestStartupValidation:
+    """Verify service refuses to start if critical files are missing."""
+
+    def test_lifespan_raises_if_template_missing(self, tmp_path, monkeypatch):
+        """lifespan() must raise RuntimeError when TEMPLATE_PDF does not exist."""
+        import asyncio
+
+        import web.swppp_api.main as swppp_main
+
+        monkeypatch.setattr(swppp_main, "TEMPLATE_PDF", tmp_path / "nonexistent.pdf")
+
+        async def _run():
+            async with swppp_main.lifespan(swppp_main.app):
+                pass
+
+        with pytest.raises(RuntimeError, match="required files missing"):
+            asyncio.run(_run())
+
+    def test_lifespan_raises_if_mapping_missing(self, tmp_path, monkeypatch):
+        """lifespan() must raise RuntimeError when MAPPING_YAML does not exist."""
+        import asyncio
+
+        import web.swppp_api.main as swppp_main
+
+        monkeypatch.setattr(swppp_main, "MAPPING_YAML", tmp_path / "nonexistent.yaml")
+
+        async def _run():
+            async with swppp_main.lifespan(swppp_main.app):
+                pass
+
+        with pytest.raises(RuntimeError, match="required files missing"):
+            asyncio.run(_run())
+
+
+# ── Tier 5: Session Error Logging ───────────────────────────────────────
+
+
+class TestSessionErrorLogging:
+    """Verify session CRUD routes log errors with full tracebacks."""
+
+    def test_session_list_db_error_logged(self, monkeypatch, caplog):
+        """list_sessions must log DB errors with exc_info=True before returning 500."""
+        import logging
+
+        from web.swppp_api import db as session_db
+
+        def _broken_connect():
+            raise RuntimeError("DB connection failed")
+
+        monkeypatch.setattr(session_db, "connect", _broken_connect)
+
+        c = _authed_client()
+        with caplog.at_level(logging.ERROR, logger="web.swppp_api.main"):
+            r = c.get("/swppp/api/sessions")
+
+        assert r.status_code == 500
+        assert "Failed to retrieve sessions" in r.json()["detail"]
+        # Verify error was logged
+        assert any("Session list failed" in record.message for record in caplog.records)
+        # Verify exc_info was captured (traceback present)
+        assert any(record.exc_info is not None for record in caplog.records)
+
+    def test_session_save_db_error_logged(self, monkeypatch, caplog):
+        """save_session must log DB errors with exc_info=True before returning 500."""
+        import logging
+
+        from web.swppp_api import db as session_db
+
+        # Let connect work but make save_session fail
+        original_connect = session_db.connect
+
+        class BrokenConnection:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def execute(self, *args):
+                raise RuntimeError("Save failed")
+
+        def _connect_broken():
+            return BrokenConnection()
+
+        monkeypatch.setattr(session_db, "connect", _connect_broken)
+        monkeypatch.setattr(
+            session_db,
+            "save_session",
+            lambda *args: (_ for _ in ()).throw(RuntimeError("Save failed")),
+        )
+
+        c = _authed_client()
+        with caplog.at_level(logging.ERROR, logger="web.swppp_api.main"):
+            r = c.put("/swppp/api/sessions/test", json={"data": "test"})
+
+        assert r.status_code == 500
+        assert "Failed to save session" in r.json()["detail"]
+        assert any("Session save failed" in record.message for record in caplog.records)
+        assert any(record.exc_info is not None for record in caplog.records)
