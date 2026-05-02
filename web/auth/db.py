@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import secrets
 import sqlite3
 import uuid
@@ -28,6 +29,9 @@ SAFE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 # Session lifetime: 90-day sliding window
 SESSION_LIFETIME_DAYS = 90
 
+# Valid company-user roles.
+COMPANY_ROLES = frozenset({"company_admin", "pm", "viewer"})
+
 SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS apps (
     id            TEXT PRIMARY KEY,
@@ -39,13 +43,14 @@ CREATE TABLE IF NOT EXISTS apps (
 );
 
 CREATE TABLE IF NOT EXISTS users (
-    id            TEXT PRIMARY KEY,
-    display_name  TEXT NOT NULL,
-    password_hash TEXT,
-    is_active     INTEGER NOT NULL DEFAULT 1,
-    is_admin      INTEGER NOT NULL DEFAULT 0,
-    created_at    TEXT NOT NULL,
-    last_seen_at  TEXT NOT NULL
+    id                   TEXT PRIMARY KEY,
+    display_name         TEXT NOT NULL,
+    password_hash        TEXT,
+    is_active            INTEGER NOT NULL DEFAULT 1,
+    is_admin             INTEGER NOT NULL DEFAULT 0,
+    is_platform_admin    INTEGER NOT NULL DEFAULT 0,
+    created_at           TEXT NOT NULL,
+    last_seen_at         TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS invite_codes (
@@ -73,6 +78,47 @@ CREATE TABLE IF NOT EXISTS sessions (
     created_at   TEXT NOT NULL,
     last_seen_at TEXT NOT NULL,
     expires_at   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS companies (
+    id                           TEXT PRIMARY KEY,
+    legal_name                   TEXT NOT NULL,
+    display_name                 TEXT NOT NULL,
+    slug                         TEXT NOT NULL UNIQUE,
+    primary_timezone             TEXT NOT NULL DEFAULT 'America/Chicago',
+    address                      TEXT,
+    phone                        TEXT,
+    logo_path                    TEXT,
+    website                      TEXT,
+    is_active                    INTEGER NOT NULL DEFAULT 1,
+    paused_at                    TEXT,
+    paused_reason                TEXT,
+    plan                         TEXT,
+    seat_limit                   INTEGER,
+    active_until                 TEXT,
+    settings_json                TEXT,
+    created_at                   TEXT NOT NULL,
+    created_by_platform_admin_id TEXT REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS company_users (
+    user_id    TEXT NOT NULL REFERENCES users(id),
+    company_id TEXT NOT NULL REFERENCES companies(id),
+    role       TEXT NOT NULL DEFAULT 'pm',
+    joined_at  TEXT NOT NULL,
+    is_active  INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (user_id, company_id)
+);
+
+CREATE TABLE IF NOT EXISTS company_signup_invites (
+    token                         TEXT PRIMARY KEY,
+    proposed_company_name         TEXT NOT NULL,
+    admin_email                   TEXT NOT NULL,
+    created_at                    TEXT NOT NULL,
+    expires_at                    TEXT NOT NULL,
+    claimed_at                    TEXT,
+    claimed_by_user_id            TEXT REFERENCES users(id),
+    created_by_platform_admin_id  TEXT REFERENCES users(id)
 );
 """
 
@@ -186,6 +232,28 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
             "WHERE expires_at IS NULL"
         )
         log.info("Migration 3: added expires_at column to sessions table")
+
+    # Migration 4: Add is_platform_admin column to users.
+    if not _column_exists(conn, "users", "is_platform_admin"):
+        conn.execute(
+            "ALTER TABLE users ADD COLUMN is_platform_admin INTEGER NOT NULL DEFAULT 0"
+        )
+        # Backfill: existing admins become platform admins.
+        conn.execute("UPDATE users SET is_platform_admin = is_admin")
+        log.info("Migration 4: added is_platform_admin column to users")
+
+    # Migration 5: Add email column to users.
+    if not _column_exists(conn, "users", "email"):
+        conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
+        log.info("Migration 5: added email column to users")
+
+    # Migration 6: Add company_id and role columns to invite_codes (employee invite extension).
+    if not _column_exists(conn, "invite_codes", "company_id"):
+        conn.execute(
+            "ALTER TABLE invite_codes ADD COLUMN company_id TEXT REFERENCES companies(id)"
+        )
+        conn.execute("ALTER TABLE invite_codes ADD COLUMN role TEXT")
+        log.info("Migration 6: added company_id and role columns to invite_codes")
 
 
 # ── Apps ─────────────────────────────────────────────────────────────────
@@ -303,9 +371,10 @@ def create_user(
     user_id = str(uuid.uuid4())
     now = _now()
     conn.execute(
-        "INSERT INTO users (id, display_name, is_active, is_admin, created_at, last_seen_at) "
-        "VALUES (?, ?, 1, ?, ?, ?)",
-        (user_id, display_name, int(is_admin), now, now),
+        "INSERT INTO users "
+        "(id, display_name, is_active, is_admin, is_platform_admin, created_at, last_seen_at) "
+        "VALUES (?, ?, 1, ?, ?, ?, ?)",
+        (user_id, display_name, int(is_admin), int(is_admin), now, now),
     )
     return user_id
 
@@ -468,7 +537,7 @@ def validate_session(conn: sqlite3.Connection, token: str) -> dict[str, Any] | N
     """Look up session → active user.  Returns user dict with app list, or None."""
     now = _now()
     row = conn.execute(
-        "SELECT u.id, u.display_name, u.is_active, u.is_admin "
+        "SELECT u.id, u.display_name, u.is_active, u.is_admin, u.is_platform_admin "
         "FROM sessions s JOIN users u ON s.user_id = u.id "
         "WHERE s.token = ? AND (s.expires_at IS NULL OR s.expires_at > ?)",
         (token, now),
@@ -532,6 +601,173 @@ def delete_sessions_except(
     return cur.rowcount
 
 
+# ── Companies ─────────────────────────────────────────────────────────────
+
+
+def _slugify(name: str) -> str:
+    """Convert a company name to a URL-safe lowercase slug."""
+    slug = name.lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", slug)
+    slug = slug.strip("-")
+    return slug or "company"
+
+
+def create_company(
+    conn: sqlite3.Connection,
+    *,
+    legal_name: str,
+    display_name: str,
+    timezone: str = "America/Chicago",
+    address: str | None = None,
+    phone: str | None = None,
+    logo_path: str | None = None,
+    website: str | None = None,
+    created_by: str | None = None,
+) -> str:
+    """Create a new company record.  Returns the new company id."""
+    company_id = str(uuid.uuid4())
+    base_slug = _slugify(legal_name)
+    slug = base_slug
+    suffix = 2
+    while conn.execute("SELECT 1 FROM companies WHERE slug = ?", (slug,)).fetchone():
+        slug = f"{base_slug}-{suffix}"
+        suffix += 1
+    conn.execute(
+        "INSERT INTO companies "
+        "(id, legal_name, display_name, slug, primary_timezone, "
+        "address, phone, logo_path, website, created_at, created_by_platform_admin_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            company_id,
+            legal_name,
+            display_name,
+            slug,
+            timezone,
+            address,
+            phone,
+            logo_path,
+            website,
+            _now(),
+            created_by,
+        ),
+    )
+    log.info("Company created: id=%s slug=%s", company_id, slug)
+    return company_id
+
+
+def get_company(conn: sqlite3.Connection, company_id: str) -> dict[str, Any] | None:
+    row = conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def get_company_by_slug(conn: sqlite3.Connection, slug: str) -> dict[str, Any] | None:
+    row = conn.execute("SELECT * FROM companies WHERE slug = ?", (slug,)).fetchone()
+    return dict(row) if row else None
+
+
+def get_all_companies(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        "SELECT * FROM companies ORDER BY legal_name COLLATE NOCASE"
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_company(conn: sqlite3.Connection, company_id: str, **fields: Any) -> None:
+    allowed = {
+        "legal_name",
+        "display_name",
+        "primary_timezone",
+        "address",
+        "phone",
+        "logo_path",
+        "website",
+        "is_active",
+        "paused_at",
+        "paused_reason",
+        "plan",
+        "seat_limit",
+        "active_until",
+        "settings_json",
+    }
+    updates = {k: v for k, v in fields.items() if k in allowed}
+    if not updates:
+        return
+    for k in list(updates):
+        if isinstance(updates[k], bool):
+            updates[k] = int(updates[k])
+    set_clause = ", ".join(f"{k} = ?" for k in updates)
+    values = list(updates.values()) + [company_id]
+    conn.execute(f"UPDATE companies SET {set_clause} WHERE id = ?", values)
+
+
+# ── Company Users ──────────────────────────────────────────────────────────
+
+
+def add_company_user(
+    conn: sqlite3.Connection,
+    user_id: str,
+    company_id: str,
+    role: str = "pm",
+) -> None:
+    """Add or re-activate a user in a company with the given role."""
+    if role not in COMPANY_ROLES:
+        raise ValueError(
+            f"Invalid role '{role}'. Must be one of {sorted(COMPANY_ROLES)}"
+        )
+    conn.execute(
+        "INSERT OR REPLACE INTO company_users "
+        "(user_id, company_id, role, joined_at, is_active) "
+        "VALUES (?, ?, ?, ?, 1)",
+        (user_id, company_id, role, _now()),
+    )
+
+
+def get_company_user(
+    conn: sqlite3.Connection,
+    user_id: str,
+    company_id: str,
+) -> dict[str, Any] | None:
+    """Return the active membership record for a user in a company, or None."""
+    row = conn.execute(
+        "SELECT * FROM company_users "
+        "WHERE user_id = ? AND company_id = ? AND is_active = 1",
+        (user_id, company_id),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def get_company_members(
+    conn: sqlite3.Connection,
+    company_id: str,
+) -> list[dict[str, Any]]:
+    """Return all active members of a company with their role and display name."""
+    rows = conn.execute(
+        "SELECT cu.user_id, cu.role, cu.joined_at, u.display_name "
+        "FROM company_users cu "
+        "JOIN users u ON cu.user_id = u.id "
+        "WHERE cu.company_id = ? AND cu.is_active = 1 "
+        "ORDER BY u.display_name COLLATE NOCASE",
+        (company_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_user_companies(
+    conn: sqlite3.Connection,
+    user_id: str,
+) -> list[dict[str, Any]]:
+    """Return all active company memberships for a user, including company details."""
+    rows = conn.execute(
+        "SELECT c.id, c.legal_name, c.display_name, c.slug, cu.role "
+        "FROM company_users cu "
+        "JOIN companies c ON cu.company_id = c.id "
+        "WHERE cu.user_id = ? AND cu.is_active = 1 AND c.is_active = 1 "
+        "ORDER BY c.legal_name COLLATE NOCASE",
+        (user_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def delete_session_by_prefix(conn: sqlite3.Connection, token_prefix: str) -> bool:
     """Delete session by 8-char token prefix.  Returns True if exactly one removed."""
     rows = conn.execute(
@@ -564,6 +800,12 @@ def claim_invite_code(
     for app_id in app_ids:
         grant_app_access(conn, user_id, app_id)
 
+    # If this is a company employee invite, add the user to the company.
+    company_id = invite.get("company_id")
+    role = invite.get("role")
+    if company_id and role:
+        add_company_user(conn, user_id, company_id, role=role)
+
     now = _now()
     conn.execute(
         "UPDATE invite_codes SET status = 'claimed', claimed_by = ?, claimed_at = ? "
@@ -573,3 +815,138 @@ def claim_invite_code(
 
     token = create_session(conn, user_id, device_label)
     return user_id, token
+
+
+# ── Employee Invites ─────────────────────────────────────────────────────────
+
+
+def create_employee_invite(
+    conn: sqlite3.Connection,
+    display_name: str,
+    company_id: str,
+    role: str,
+    app_permissions: list[str],
+) -> str:
+    """Create an invite code that also adds the claimed user to a company with a role."""
+    if role not in COMPANY_ROLES:
+        raise ValueError(f"Invalid role '{role}'. Must be one of {sorted(COMPANY_ROLES)}")
+    code = generate_invite_code()
+    while conn.execute("SELECT 1 FROM invite_codes WHERE id = ?", (code,)).fetchone():
+        code = generate_invite_code()
+    conn.execute(
+        "INSERT INTO invite_codes "
+        "(id, display_name, status, app_permissions, grant_admin, created_at, company_id, role) "
+        "VALUES (?, ?, 'pending', ?, 0, ?, ?, ?)",
+        (code, display_name, json.dumps(app_permissions), _now(), company_id, role),
+    )
+    return code
+
+
+# ── Company Signup Invites ────────────────────────────────────────────────────
+
+
+SIGNUP_INVITE_LIFETIME_DAYS = 30
+
+
+def create_company_signup_invite(
+    conn: sqlite3.Connection,
+    proposed_company_name: str,
+    admin_email: str,
+    created_by: str,
+) -> str:
+    """Create a company signup invite for a new tenant.  Returns the token."""
+    token = secrets.token_urlsafe(32)
+    now_dt = datetime.now(timezone.utc)
+    expires_at = (now_dt + timedelta(days=SIGNUP_INVITE_LIFETIME_DAYS)).isoformat()
+    conn.execute(
+        "INSERT INTO company_signup_invites "
+        "(token, proposed_company_name, admin_email, created_at, expires_at, "
+        "created_by_platform_admin_id) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (token, proposed_company_name, admin_email, now_dt.isoformat(), expires_at, created_by),
+    )
+    log.info(
+        "Company signup invite created: proposed=%s email=%s by=%s",
+        proposed_company_name, admin_email, created_by,
+    )
+    return token
+
+
+def get_company_signup_invite(
+    conn: sqlite3.Connection,
+    token: str,
+) -> dict[str, Any] | None:
+    """Return a company signup invite by token, or None if not found."""
+    row = conn.execute(
+        "SELECT * FROM company_signup_invites WHERE token = ?", (token,)
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def get_all_company_signup_invites(
+    conn: sqlite3.Connection,
+) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        "SELECT * FROM company_signup_invites ORDER BY created_at DESC"
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def claim_company_signup_invite(
+    conn: sqlite3.Connection,
+    token: str,
+    display_name: str,
+    password: str,
+    legal_name: str,
+    company_display_name: str,
+    tz: str = "America/Chicago",
+    address: str | None = None,
+    phone: str | None = None,
+    website: str | None = None,
+    device_label: str | None = None,
+) -> tuple[str, str, str] | None:
+    """Claim a company signup invite.
+
+    Creates the company, the first company_admin user, and a session.
+    Returns (user_id, company_id, session_token) or None on failure.
+    """
+    now_dt = datetime.now(timezone.utc)
+    invite = get_company_signup_invite(conn, token)
+    if not invite:
+        return None
+    if invite["claimed_at"] is not None:
+        return None
+    if invite["expires_at"] < now_dt.isoformat():
+        return None
+
+    company_id = create_company(
+        conn,
+        legal_name=legal_name,
+        display_name=company_display_name,
+        timezone=tz,
+        address=address,
+        phone=phone,
+        website=website,
+    )
+
+    user_id = create_user(conn, display_name, is_admin=False)
+    set_user_password(conn, user_id, password)
+
+    # Grant SWPPP app access if the app exists.
+    if conn.execute("SELECT 1 FROM apps WHERE id = 'swppp'").fetchone():
+        grant_app_access(conn, user_id, "swppp")
+
+    add_company_user(conn, user_id, company_id, role="company_admin")
+
+    conn.execute(
+        "UPDATE company_signup_invites "
+        "SET claimed_at = ?, claimed_by_user_id = ? WHERE token = ?",
+        (now_dt.isoformat(), user_id, token),
+    )
+
+    log.info(
+        "Company signup claimed: company_id=%s user_id=%s",
+        company_id, user_id,
+    )
+    session_token = create_session(conn, user_id, device_label)
+    return user_id, company_id, session_token

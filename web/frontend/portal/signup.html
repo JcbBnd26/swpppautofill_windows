@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Company Signup — sw3p.pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+</head>
+
+<body class="bg-gray-100 min-h-screen flex items-center justify-center px-4">
+
+    <div x-data="signupApp()" x-init="init()" class="w-full max-w-lg">
+
+        <!-- Loading -->
+        <div x-show="state === 'loading'" class="text-center text-gray-400 py-20">Checking invite…</div>
+
+        <!-- Invalid / expired -->
+        <div x-show="state === 'invalid'" class="bg-white rounded-xl shadow-sm border p-8 text-center">
+            <div class="text-4xl mb-4">⚠️</div>
+            <h1 class="text-xl font-semibold text-gray-800 mb-2">Invite not valid</h1>
+            <p class="text-gray-500 text-sm" x-text="errorMsg"></p>
+        </div>
+
+        <!-- Already claimed -->
+        <div x-show="state === 'claimed'" class="bg-white rounded-xl shadow-sm border p-8 text-center">
+            <div class="text-4xl mb-4">✅</div>
+            <h1 class="text-xl font-semibold text-gray-800 mb-2">Already registered</h1>
+            <p class="text-gray-500 text-sm">This signup link has already been used.</p>
+            <a href="/auth/login" class="mt-4 inline-block text-blue-600 hover:underline text-sm">Go to login</a>
+        </div>
+
+        <!-- Form -->
+        <div x-show="state === 'form'" class="bg-white rounded-xl shadow-sm border p-8 space-y-6">
+            <div>
+                <h1 class="text-2xl font-bold text-gray-900">Set up your company</h1>
+                <p class="text-sm text-gray-500 mt-1">
+                    You've been invited to create a <strong>sw3p.pro</strong> account for
+                    <span class="font-medium" x-text="proposedName"></span>.
+                </p>
+            </div>
+
+            <!-- Account section -->
+            <fieldset class="space-y-3">
+                <legend class="text-sm font-semibold text-gray-700 uppercase tracking-wide">Your Account</legend>
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">Your Name <span class="text-red-500">*</span></label>
+                    <input type="text" x-model="form.display_name" placeholder="e.g. Jane Smith"
+                        class="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">Password <span class="text-red-500">*</span></label>
+                    <input type="password" x-model="form.password" placeholder="8+ characters"
+                        class="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">Confirm Password <span class="text-red-500">*</span></label>
+                    <input type="password" x-model="form.password_confirm" placeholder="Repeat password"
+                        class="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+            </fieldset>
+
+            <!-- Company section -->
+            <fieldset class="space-y-3">
+                <legend class="text-sm font-semibold text-gray-700 uppercase tracking-wide">Company Profile</legend>
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">Legal Name <span class="text-red-500">*</span></label>
+                    <input type="text" x-model="form.legal_name"
+                        class="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">Display Name <span class="text-red-500">*</span>
+                        <span class="text-xs text-gray-400">(shown to inspectors)</span></label>
+                    <input type="text" x-model="form.company_display_name"
+                        class="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">Timezone <span class="text-red-500">*</span></label>
+                    <select x-model="form.timezone"
+                        class="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="America/Chicago">Central (America/Chicago)</option>
+                        <option value="America/New_York">Eastern (America/New_York)</option>
+                        <option value="America/Denver">Mountain (America/Denver)</option>
+                        <option value="America/Los_Angeles">Pacific (America/Los_Angeles)</option>
+                        <option value="America/Anchorage">Alaska (America/Anchorage)</option>
+                        <option value="Pacific/Honolulu">Hawaii (Pacific/Honolulu)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">Phone <span class="text-xs text-gray-400">(optional)</span></label>
+                    <input type="tel" x-model="form.phone"
+                        class="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">Address <span class="text-xs text-gray-400">(optional)</span></label>
+                    <input type="text" x-model="form.address"
+                        class="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">Website <span class="text-xs text-gray-400">(optional)</span></label>
+                    <input type="url" x-model="form.website" placeholder="https://..."
+                        class="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+            </fieldset>
+
+            <!-- Error -->
+            <p x-show="errorMsg" class="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2"
+                x-text="errorMsg"></p>
+
+            <button @click="submit()" :disabled="submitting || !isValid()"
+                class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg font-medium transition disabled:opacity-50">
+                <span x-show="!submitting">Create Account &amp; Company</span>
+                <span x-show="submitting">Creating…</span>
+            </button>
+        </div>
+
+        <!-- Success -->
+        <div x-show="state === 'done'" class="bg-white rounded-xl shadow-sm border p-8 text-center">
+            <div class="text-4xl mb-4">🎉</div>
+            <h1 class="text-xl font-semibold text-gray-800 mb-2">You're in!</h1>
+            <p class="text-gray-500 text-sm mb-4">Your company account is ready. Redirecting…</p>
+        </div>
+
+    </div>
+
+    <script>
+        function signupApp() {
+            return {
+                state: 'loading',
+                token: '',
+                proposedName: '',
+                errorMsg: '',
+                submitting: false,
+                form: {
+                    display_name: '',
+                    password: '',
+                    password_confirm: '',
+                    legal_name: '',
+                    company_display_name: '',
+                    timezone: 'America/Chicago',
+                    phone: '',
+                    address: '',
+                    website: '',
+                },
+
+                async init() {
+                    // Token is the last path segment: /signup/{token}
+                    this.token = window.location.pathname.split('/').pop();
+                    if (!this.token) { this.state = 'invalid'; this.errorMsg = 'No invite token found.'; return; }
+                    try {
+                        const data = await fetch(`/auth/signup-invite/${encodeURIComponent(this.token)}`)
+                            .then(r => {
+                                if (r.status === 410) return r.json().then(e => Promise.reject(e));
+                                if (!r.ok) return r.json().then(e => Promise.reject(e));
+                                return r.json();
+                            });
+                        this.proposedName = data.proposed_company_name;
+                        this.form.legal_name = data.proposed_company_name;
+                        this.form.company_display_name = data.proposed_company_name;
+                        this.state = 'form';
+                    } catch (e) {
+                        const msg = e.detail || 'This invite is no longer valid.';
+                        if (msg.includes('already been used')) {
+                            this.state = 'claimed';
+                        } else {
+                            this.state = 'invalid';
+                            this.errorMsg = msg;
+                        }
+                    }
+                },
+
+                isValid() {
+                    return this.form.display_name.trim() &&
+                        this.form.password.length >= 8 &&
+                        this.form.password === this.form.password_confirm &&
+                        this.form.legal_name.trim() &&
+                        this.form.company_display_name.trim();
+                },
+
+                async submit() {
+                    this.errorMsg = '';
+                    if (this.form.password !== this.form.password_confirm) {
+                        this.errorMsg = 'Passwords do not match.';
+                        return;
+                    }
+                    this.submitting = true;
+                    try {
+                        await fetch('/auth/signup', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'same-origin',
+                            body: JSON.stringify({
+                                token: this.token,
+                                display_name: this.form.display_name.trim(),
+                                password: this.form.password,
+                                legal_name: this.form.legal_name.trim(),
+                                company_display_name: this.form.company_display_name.trim(),
+                                timezone: this.form.timezone,
+                                phone: this.form.phone.trim() || null,
+                                address: this.form.address.trim() || null,
+                                website: this.form.website.trim() || null,
+                            }),
+                        }).then(r => {
+                            if (!r.ok) return r.json().then(e => Promise.reject(e));
+                            return r.json();
+                        });
+                        this.state = 'done';
+                        setTimeout(() => { window.location.href = '/'; }, 1500);
+                    } catch (e) {
+                        this.errorMsg = e.detail || 'Signup failed. Please try again.';
+                    } finally {
+                        this.submitting = false;
+                    }
+                },
+            };
+        }
+    </script>
+
+</body>
+
+</html>

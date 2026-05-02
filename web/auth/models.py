@@ -100,6 +100,88 @@ class SessionInfo(BaseModel):
     last_seen_at: str
 
 
+# ── Companies ────────────────────────────────────────────────────────────
+
+
+class CompanyInfo(BaseModel):
+    id: str
+    legal_name: str
+    display_name: str
+    slug: str
+    primary_timezone: str
+    is_active: bool
+    created_at: str
+
+
+class CompanyUserInfo(BaseModel):
+    user_id: str
+    display_name: str
+    role: str
+    joined_at: str
+
+
+class CompanyListResponse(BaseModel):
+    companies: list[CompanyInfo]
+
+
+# ── Company Signup (IR #2) ────────────────────────────────────────────────
+
+
+class CompanySignupInviteRequest(BaseModel):
+    proposed_company_name: str = Field(max_length=200)
+    admin_email: str = Field(max_length=200)
+
+
+class CompanySignupInviteResponse(BaseModel):
+    token: str
+    link: str
+
+
+class CompanySignupInviteInfo(BaseModel):
+    token: str
+    proposed_company_name: str
+    admin_email: str
+    created_at: str
+    expires_at: str
+    claimed_at: str | None
+
+
+class CompanySignupInviteListResponse(BaseModel):
+    invites: list[CompanySignupInviteInfo]
+
+
+class CompanyClaimRequest(BaseModel):
+    token: str
+    display_name: str = Field(max_length=200)
+    password: str = Field(min_length=8, max_length=200)
+    legal_name: str = Field(max_length=200)
+    company_display_name: str = Field(max_length=200)
+    timezone: str = Field(default="America/Chicago", max_length=80)
+    address: str | None = Field(default=None, max_length=400)
+    phone: str | None = Field(default=None, max_length=40)
+    website: str | None = Field(default=None, max_length=400)
+
+
+class CompanyClaimResponse(BaseModel):
+    success: bool
+    company_id: str
+    redirect: str
+
+
+# ── Employee Invite (IR #2) ───────────────────────────────────────────────
+
+
+class EmployeeInviteRequest(BaseModel):
+    display_name: str = Field(max_length=200)
+    role: str
+    app_permissions: list[str] = Field(max_length=20)
+
+
+class EmployeeInviteResponse(BaseModel):
+    code: str
+    link: str
+
+
 class SessionListResponse(BaseModel):
     sessions: list[SessionInfo]
 

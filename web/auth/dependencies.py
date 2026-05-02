@@ -33,6 +33,40 @@ def require_admin(
     return user
 
 
+def require_platform_admin(
+    user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Raises 403 if user is not a platform admin (is_platform_admin flag)."""
+    if not user.get("is_platform_admin"):
+        raise HTTPException(status_code=403, detail="Platform admin access required")
+    return user
+
+
+def require_company_member(
+    company_id: str,
+    user: dict[str, Any] = Depends(get_current_user),
+    db: sqlite3.Connection = Depends(get_db),
+) -> dict[str, Any]:
+    """Verify the requesting user is an active member of company_id.
+
+    Platform admins bypass the membership check (they can see all companies).
+    Injects ``company_role`` into the returned user dict for downstream use.
+    FastAPI injects ``company_id`` automatically from the matching path parameter.
+    """
+    if user.get("is_platform_admin"):
+        user["company_role"] = "platform_admin"
+        return user
+    row = db.execute(
+        "SELECT role FROM company_users "
+        "WHERE user_id = ? AND company_id = ? AND is_active = 1",
+        (user["id"], company_id),
+    ).fetchone()
+    if not row:
+        raise HTTPException(status_code=403, detail="Not a member of this company")
+    user["company_role"] = row["role"]
+    return user
+
+
 def require_app(app_id: str):
     """Dependency factory — returns a checker that verifies app access."""
 

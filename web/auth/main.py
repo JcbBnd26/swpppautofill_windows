@@ -6,6 +6,7 @@ import os
 import re
 import sqlite3
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +14,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from web.auth import db
-from web.auth.dependencies import get_current_user, require_admin
+from web.auth.dependencies import get_current_user, require_admin, require_platform_admin
 from web.auth.models import (
     AppCreateRequest,
     AppFullInfo,
@@ -21,9 +22,20 @@ from web.auth.models import (
     AppListResponse,
     ClaimRequest,
     ClaimResponse,
+    CompanyClaimRequest,
+    CompanyClaimResponse,
+    CompanyInfo,
+    CompanyListResponse,
+    CompanySignupInviteInfo,
+    CompanySignupInviteListResponse,
+    CompanySignupInviteRequest,
+    CompanySignupInviteResponse,
+    CompanyUserInfo,
     CreateUserRequest,
     CreateUserResponse,
     DeleteSessionsResponse,
+    EmployeeInviteRequest,
+    EmployeeInviteResponse,
     GrantAppRequest,
     InviteCreateRequest,
     InviteCreateResponse,
@@ -699,6 +711,286 @@ def admin_page(
     if html_path.exists():
         return FileResponse(html_path, media_type="text/html")
     return HTMLResponse("<h1>Admin page not found</h1>", status_code=500)
+
+
+@app.get("/signup/{token}")
+def signup_page(token: str):
+    html_path = FRONTEND_DIR / "signup.html"
+    if html_path.exists():
+        return FileResponse(html_path, media_type="text/html")
+    return HTMLResponse("<h1>Signup page not found</h1>", status_code=500)
+
+
+# ── Platform Admin: Company Signup Invites ───────────────────────────────
+
+
+@app.post("/admin/company-signup-invites")
+def create_company_signup_invite(
+    body: CompanySignupInviteRequest,
+    admin: dict[str, Any] = Depends(require_platform_admin),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    name = body.proposed_company_name.strip()
+    email = body.admin_email.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Company name is required")
+    if not email:
+        raise HTTPException(status_code=400, detail="Admin email is required")
+    token = db.create_company_signup_invite(conn, name, email, created_by=admin["id"])
+    link = f"{BASE_URL.rstrip('/')}/signup/{token}"
+    log.info(
+        "Company signup invite created: proposed=%s email=%s by=%s",
+        name, email, admin["id"],
+    )
+    return CompanySignupInviteResponse(token=token, link=link)
+
+
+@app.get("/admin/company-signup-invites")
+def list_company_signup_invites(
+    _admin: dict[str, Any] = Depends(require_platform_admin),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    invites = db.get_all_company_signup_invites(conn)
+    return CompanySignupInviteListResponse(
+        invites=[
+            CompanySignupInviteInfo(
+                token=inv["token"],
+                proposed_company_name=inv["proposed_company_name"],
+                admin_email=inv["admin_email"],
+                created_at=inv["created_at"],
+                expires_at=inv["expires_at"],
+                claimed_at=inv["claimed_at"],
+            )
+            for inv in invites
+        ]
+    )
+
+
+# ── Public: Company Signup Claim ─────────────────────────────────────────
+
+
+@app.get("/auth/signup-invite/{token}")
+def get_signup_invite_info(
+    token: str,
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    """Return minimal info about a signup invite so the page can pre-fill the company name."""
+    invite = db.get_company_signup_invite(conn, token)
+    if not invite:
+        raise HTTPException(status_code=404, detail="Invite not found")
+    if invite["claimed_at"] is not None:
+        raise HTTPException(status_code=410, detail="This invite has already been used")
+    now_dt = datetime.now(timezone.utc)
+    if invite["expires_at"] < now_dt.isoformat():
+        raise HTTPException(status_code=410, detail="This invite has expired")
+    return {
+        "proposed_company_name": invite["proposed_company_name"],
+        "admin_email": invite["admin_email"],
+    }
+
+
+@app.post("/auth/signup")
+def claim_company_signup(
+    body: CompanyClaimRequest,
+    request: Request,
+    response: Response,
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    device_label = (request.headers.get("User-Agent") or "")[:200] or None
+    result = db.claim_company_signup_invite(
+        conn,
+        token=body.token,
+        display_name=body.display_name.strip(),
+        password=body.password,
+        legal_name=body.legal_name.strip(),
+        company_display_name=body.company_display_name.strip(),
+        tz=body.timezone,
+        address=body.address,
+        phone=body.phone,
+        website=body.website,
+        device_label=device_label,
+    )
+    if not result:
+        log.warning(
+            "Company signup claim failed: token=%s ip=%s",
+            body.token,
+            request.client.host if request.client else "unknown",
+        )
+        raise HTTPException(
+            status_code=400, detail="Invalid, expired, or already-used signup invite"
+        )
+    user_id, company_id, session_token = result
+    log.info("Company signup complete: company_id=%s user_id=%s", company_id, user_id)
+    response.set_cookie(
+        key="tools_session",
+        value=session_token,
+        httponly=True,
+        secure=not DEV_MODE,
+        samesite="lax",
+        path="/",
+        max_age=COOKIE_MAX_AGE,
+    )
+    return CompanyClaimResponse(success=True, company_id=company_id, redirect="/")
+
+
+# ── Company Admin: Employee Invites ──────────────────────────────────────
+
+
+@app.post("/companies/{company_id}/invites")
+def create_employee_invite(
+    company_id: str,
+    body: EmployeeInviteRequest,
+    user: dict[str, Any] = Depends(get_current_user),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    # Only company_admin (or platform admin) may invite employees.
+    if not user.get("is_platform_admin"):
+        membership = db.get_company_user(conn, user["id"], company_id)
+        if not membership or membership["role"] != "company_admin":
+            raise HTTPException(status_code=403, detail="Company admin access required")
+    company = db.get_company(conn, company_id)
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+    if body.role not in db.COMPANY_ROLES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid role. Must be one of: {sorted(db.COMPANY_ROLES)}",
+        )
+    name = body.display_name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Display name is required")
+    if not body.app_permissions:
+        raise HTTPException(status_code=400, detail="At least one app must be selected")
+    for aid in body.app_permissions:
+        if not db.get_app(conn, aid):
+            raise HTTPException(status_code=400, detail=f"Unknown app: {aid}")
+    existing = conn.execute(
+        "SELECT 1 FROM users WHERE display_name = ? COLLATE NOCASE LIMIT 1", (name,)
+    ).fetchone()
+    if existing:
+        raise HTTPException(status_code=400, detail=f"A user named '{name}' already exists")
+    code = db.create_employee_invite(conn, name, company_id, body.role, body.app_permissions)
+    link = f"{BASE_URL.rstrip('/')}/auth/login?code={code}"
+    log.info(
+        "Employee invite created: code=%s name=%s role=%s company=%s by=%s",
+        code, name, body.role, company_id, user["id"],
+    )
+    return EmployeeInviteResponse(code=code, link=link)
+
+
+# ── Company Admin: Member Management ─────────────────────────────────────
+
+
+@app.get("/companies/{company_id}/members")
+def list_company_members(
+    company_id: str,
+    user: dict[str, Any] = Depends(get_current_user),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    if not user.get("is_platform_admin"):
+        membership = db.get_company_user(conn, user["id"], company_id)
+        if not membership:
+            raise HTTPException(status_code=403, detail="Not a member of this company")
+    company = db.get_company(conn, company_id)
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+    members = db.get_company_members(conn, company_id)
+    return {
+        "company_id": company_id,
+        "members": [
+            CompanyUserInfo(
+                user_id=m["user_id"],
+                display_name=m["display_name"],
+                role=m["role"],
+                joined_at=m["joined_at"],
+            )
+            for m in members
+        ],
+    }
+
+
+@app.patch("/companies/{company_id}/members/{user_id}")
+def update_member_role(
+    company_id: str,
+    user_id: str,
+    body: dict[str, Any],
+    admin_user: dict[str, Any] = Depends(get_current_user),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    if not admin_user.get("is_platform_admin"):
+        membership = db.get_company_user(conn, admin_user["id"], company_id)
+        if not membership or membership["role"] != "company_admin":
+            raise HTTPException(status_code=403, detail="Company admin access required")
+    new_role = body.get("role", "").strip()
+    if new_role not in db.COMPANY_ROLES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid role. Must be one of: {sorted(db.COMPANY_ROLES)}",
+        )
+    target = db.get_company_user(conn, user_id, company_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Member not found in this company")
+    conn.execute(
+        "UPDATE company_users SET role = ? WHERE user_id = ? AND company_id = ?",
+        (new_role, user_id, company_id),
+    )
+    log.info(
+        "Member role updated: user=%s company=%s role=%s by=%s",
+        user_id, company_id, new_role, admin_user["id"],
+    )
+    return SuccessResponse()
+
+
+@app.delete("/companies/{company_id}/members/{user_id}")
+def remove_company_member(
+    company_id: str,
+    user_id: str,
+    admin_user: dict[str, Any] = Depends(get_current_user),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    if not admin_user.get("is_platform_admin"):
+        membership = db.get_company_user(conn, admin_user["id"], company_id)
+        if not membership or membership["role"] != "company_admin":
+            raise HTTPException(status_code=403, detail="Company admin access required")
+    if user_id == admin_user["id"]:
+        raise HTTPException(status_code=400, detail="Cannot remove yourself")
+    target = db.get_company_user(conn, user_id, company_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Member not found in this company")
+    conn.execute(
+        "UPDATE company_users SET is_active = 0 WHERE user_id = ? AND company_id = ?",
+        (user_id, company_id),
+    )
+    log.info(
+        "Member removed: user=%s company=%s by=%s",
+        user_id, company_id, admin_user["id"],
+    )
+    return SuccessResponse()
+
+
+# ── Platform Admin: Company List ─────────────────────────────────────────
+
+
+@app.get("/admin/companies")
+def list_companies(
+    _admin: dict[str, Any] = Depends(require_platform_admin),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    companies = db.get_all_companies(conn)
+    return CompanyListResponse(
+        companies=[
+            CompanyInfo(
+                id=c["id"],
+                legal_name=c["legal_name"],
+                display_name=c["display_name"],
+                slug=c["slug"],
+                primary_timezone=c["primary_timezone"],
+                is_active=bool(c["is_active"]),
+                created_at=c["created_at"],
+            )
+            for c in companies
+        ]
+    )
 
 
 # ── Dev-mode: mount SWPPP sub-app ────────────────────────────────────────
