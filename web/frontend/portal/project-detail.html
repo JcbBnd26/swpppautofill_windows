@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Project Detail | Company Tools</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+</head>
+
+<body class="bg-gray-100 min-h-screen">
+
+    <div x-data="projectDetailApp()" x-init="init()">
+
+        <!-- Header -->
+        <header class="bg-white shadow-sm">
+            <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+                <div class="flex items-center gap-4">
+                    <a href="/portal/projects.html" class="text-blue-600 hover:underline text-sm">← Back to Projects</a>
+                    <h1 class="text-lg font-semibold text-gray-800" x-text="project.project_number || 'Project'"></h1>
+                </div>
+                <div class="flex items-center gap-4 text-sm text-gray-600">
+                    <span x-text="user.display_name"></span>
+                    <button @click="logout()" class="text-red-600 hover:underline">Logout</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Loading -->
+        <div x-show="loading" class="text-center mt-20 text-gray-500">Loading project…</div>
+
+        <!-- Error -->
+        <div x-show="error" class="max-w-7xl mx-auto px-6 py-10">
+            <div class="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700" x-text="error"></div>
+        </div>
+
+        <!-- Main Content -->
+        <main x-show="!loading && !error" class="max-w-7xl mx-auto px-6 py-10">
+
+            <!-- Setup Warning Banner -->
+            <div x-show="project.status === 'setup_incomplete'"
+                class="mb-6 bg-yellow-50 border-l-4 border-yellow-400 p-4">
+                <div class="flex items-start gap-3">
+                    <svg class="w-6 h-6 text-yellow-600 flex-shrink-0" fill="none" stroke="currentColor"
+                        viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <div>
+                        <h3 class="text-sm font-medium text-yellow-800">Setup Required</h3>
+                        <p class="mt-1 text-sm text-yellow-700">
+                            This project needs a standing template before it can generate automated weekly reports.
+                            <button @click="activeTab = 'template'" class="underline font-medium hover:text-yellow-900">
+                                Set up template →
+                            </button>
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tabs -->
+            <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+
+                <!-- Tab Headers -->
+                <div class="border-b border-gray-200 bg-gray-50">
+                    <nav class="flex">
+                        <button @click="activeTab = 'overview'"
+                            :class="activeTab === 'overview' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-600'"
+                            class="px-6 py-3 text-sm font-medium hover:text-blue-600 transition">
+                            Overview
+                        </button>
+                        <button @click="activeTab = 'template'"
+                            :class="activeTab === 'template' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-600'"
+                            class="px-6 py-3 text-sm font-medium hover:text-blue-600 transition">
+                            Template
+                        </button>
+                        <button @click="activeTab = 'settings'"
+                            :class="activeTab === 'settings' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-600'"
+                            class="px-6 py-3 text-sm font-medium hover:text-blue-600 transition">
+                            Settings
+                        </button>
+                        <button @click="activeTab = 'mailbox'"
+                            :class="activeTab === 'mailbox' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-600'"
+                            class="px-6 py-3 text-sm font-medium hover:text-blue-600 transition">
+                            Mailbox
+                        </button>
+                    </nav>
+                </div>
+
+                <!-- Tab Content -->
+                <div class="p-8">
+
+                    <!-- TAB 1: Overview -->
+                    <div x-show="activeTab === 'overview'" class="space-y-6">
+                        <h2 class="text-xl font-semibold text-gray-800">Project Information</h2>
+
+                        <div class="grid grid-cols-2 gap-6">
+                            <div>
+                                <p class="text-sm text-gray-500 mb-1">Project Number</p>
+                                <p class="text-base font-medium text-gray-900" x-text="project.project_number"></p>
+                            </div>
+                            <div>
+                                <p class="text-sm text-gray-500 mb-1">Project Name</p>
+                                <p class="text-base font-medium text-gray-900" x-text="project.project_name"></p>
+                            </div>
+                            <div>
+                                <p class="text-sm text-gray-500 mb-1">Site Address</p>
+                                <p class="text-base text-gray-900" x-text="project.site_address"></p>
+                            </div>
+                            <div>
+                                <p class="text-sm text-gray-500 mb-1">Rain Station</p>
+                                <p class="text-base text-gray-900" x-text="project.rain_station_code"></p>
+                            </div>
+                            <div>
+                                <p class="text-sm text-gray-500 mb-1">Timezone</p>
+                                <p class="text-base text-gray-900" x-text="project.timezone"></p>
+                            </div>
+                            <div>
+                                <p class="text-sm text-gray-500 mb-1">Status</p>
+                                <span
+                                    class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium"
+                                    :class="{
+                                          'bg-green-100 text-green-700': project.status === 'active',
+                                          'bg-yellow-100 text-yellow-700': project.status === 'setup_incomplete' || project.status === 'paused',
+                                          'bg-gray-100 text-gray-700': project.status !== 'active' && project.status !== 'setup_incomplete' && project.status !== 'paused'
+                                      }">
+                                    <span class="w-1.5 h-1.5 rounded-full" :class="{
+                                              'bg-green-500': project.status === 'active',
+                                              'bg-yellow-500': project.status === 'setup_incomplete' || project.status === 'paused',
+                                              'bg-gray-500': project.status !== 'active' && project.status !== 'setup_incomplete' && project.status !== 'paused'
+                                          }"></span>
+                                    <span x-text="formatStatus(project.status)"></span>
+                                </span>
+                            </div>
+                        </div>
+
+                        <div class="pt-6 border-t border-gray-200">
+                            <p class="text-sm text-gray-500 mb-2">Last Report</p>
+                            <p class="text-base text-gray-900"
+                                x-text="formatDate(project.last_successful_run_at) || '—'"></p>
+                        </div>
+                    </div>
+
+                    <!-- TAB 2: Template -->
+                    <div x-show="activeTab === 'template'" class="space-y-6">
+
+                        <div class="flex items-center justify-between">
+                            <h2 class="text-xl font-semibold text-gray-800">Standing Template</h2>
+                            <button x-show="!editMode && activeVersion" @click="editTemplate()"
+                                class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition">
+                                Edit Template
+                            </button>
+                        </div>
+
+                        <!-- Empty State -->
+                        <div x-show="!activeVersion && !editMode" class="text-center py-12">
+                            <svg class="w-16 h-16 mx-auto text-gray-300 mb-4" fill="none" stroke="currentColor"
+                                viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                            <h3 class="text-lg font-medium text-gray-700 mb-2">No Template Yet</h3>
+                            <p class="text-sm text-gray-500 mb-6">Set up your standing template to begin generating
+                                weekly reports.</p>
+                            <button @click="editMode = true"
+                                class="inline-block bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg text-sm font-medium transition">
+                                Create Template
+                            </button>
+                        </div>
+
+                        <!-- Template Form (Edit Mode) -->
+                        <div x-show="editMode" class="space-y-6">
+                            <form @submit.prevent="saveTemplate()">
+
+                                <div class="space-y-5">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1.5">Job/Piece</label>
+                                        <input type="text" x-model="templateForm.job_piece"
+                                            class="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                    </div>
+
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1.5">Contract
+                                            ID</label>
+                                        <input type="text" x-model="templateForm.contract_id"
+                                            class="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                    </div>
+
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1.5">Location
+                                            Description (Line 1)</label>
+                                        <input type="text" x-model="templateForm.location_description_1"
+                                            class="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                    </div>
+
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1.5">Location
+                                            Description (Line 2)</label>
+                                        <input type="text" x-model="templateForm.location_description_2"
+                                            class="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                    </div>
+
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1.5">RE/ODOT Contact
+                                            1</label>
+                                        <input type="text" x-model="templateForm.re_odot_contact_1"
+                                            class="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                    </div>
+
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1.5">RE/ODOT Contact
+                                            2</label>
+                                        <input type="text" x-model="templateForm.re_odot_contact_2"
+                                            class="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                    </div>
+
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1.5">Inspection
+                                            Type</label>
+                                        <input type="text" x-model="templateForm.inspection_type"
+                                            class="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                    </div>
+
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1.5">Inspected
+                                            By</label>
+                                        <input type="text" x-model="templateForm.inspected_by"
+                                            class="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                    </div>
+
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1.5">Reviewed
+                                            By</label>
+                                        <input type="text" x-model="templateForm.reviewed_by"
+                                            class="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                    </div>
+                                </div>
+
+                                <div class="flex items-center gap-3 mt-6 pt-6 border-t border-gray-200">
+                                    <button type="submit" :disabled="submitting"
+                                        class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg text-sm font-medium transition disabled:opacity-50">
+                                        <span x-show="!submitting">Save Template</span>
+                                        <span x-show="submitting">Saving…</span>
+                                    </button>
+                                    <button type="button" @click="cancelEdit()" :disabled="submitting"
+                                        class="px-6 py-2.5 text-sm font-medium text-gray-700 hover:text-gray-900 disabled:opacity-50">
+                                        Cancel
+                                    </button>
+                                </div>
+
+                                <p x-show="saveError" x-text="saveError" class="mt-4 text-sm text-red-600"></p>
+
+                            </form>
+                        </div>
+
+                        <!-- Read-Only View -->
+                        <div x-show="activeVersion && !editMode" class="space-y-6">
+
+                            <div class="flex items-center gap-3 mb-4">
+                                <button @click="previewTemplate()"
+                                    class="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg transition">
+                                    👁️ Preview Report
+                                </button>
+                                <p class="text-xs text-gray-500">See what next week's auto-weekly report will look like
+                                </p>
+                            </div>
+
+                            <div class="grid grid-cols-2 gap-6 bg-gray-50 p-6 rounded-lg">
+                                <div>
+                                    <p class="text-sm text-gray-500 mb-1">Job/Piece</p>
+                                    <p class="text-base text-gray-900" x-text="activeVersionData.job_piece || '—'"></p>
+                                </div>
+                                <div>
+                                    <p class="text-sm text-gray-500 mb-1">Contract ID</p>
+                                    <p class="text-base text-gray-900" x-text="activeVersionData.contract_id || '—'">
+                                    </p>
+                                </div>
+                                <div>
+                                    <p class="text-sm text-gray-500 mb-1">Location Description 1</p>
+                                    <p class="text-base text-gray-900"
+                                        x-text="activeVersionData.location_description_1 || '—'"></p>
+                                </div>
+                                <div>
+                                    <p class="text-sm text-gray-500 mb-1">Location Description 2</p>
+                                    <p class="text-base text-gray-900"
+                                        x-text="activeVersionData.location_description_2 || '—'"></p>
+                                </div>
+                                <div>
+                                    <p class="text-sm text-gray-500 mb-1">RE/ODOT Contact 1</p>
+                                    <p class="text-base text-gray-900"
+                                        x-text="activeVersionData.re_odot_contact_1 || '—'"></p>
+                                </div>
+                                <div>
+                                    <p class="text-sm text-gray-500 mb-1">RE/ODOT Contact 2</p>
+                                    <p class="text-base text-gray-900"
+                                        x-text="activeVersionData.re_odot_contact_2 || '—'"></p>
+                                </div>
+                                <div>
+                                    <p class="text-sm text-gray-500 mb-1">Inspection Type</p>
+                                    <p class="text-base text-gray-900"
+                                        x-text="activeVersionData.inspection_type || '—'"></p>
+                                </div>
+                                <div>
+                                    <p class="text-sm text-gray-500 mb-1">Inspected By</p>
+                                    <p class="text-base text-gray-900" x-text="activeVersionData.inspected_by || '—'">
+                                    </p>
+                                </div>
+                                <div class="col-span-2">
+                                    <p class="text-sm text-gray-500 mb-1">Reviewed By</p>
+                                    <p class="text-base text-gray-900" x-text="activeVersionData.reviewed_by || '—'">
+                                    </p>
+                                </div>
+                            </div>
+
+                            <!-- Version History -->
+                            <div class="pt-6 border-t border-gray-200">
+                                <h3 class="text-lg font-semibold text-gray-800 mb-4">Version History</h3>
+                                <div x-show="versions.length === 0" class="text-sm text-gray-500">No version history
+                                    yet.</div>
+                                <div x-show="versions.length > 0" class="space-y-2">
+                                    <template x-for="version in versions" :key="version.id">
+                                        <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                                            <div>
+                                                <p class="text-sm font-medium text-gray-900">
+                                                    Version <span x-text="version.version_number"></span>
+                                                    <span x-show="version.status === 'active'"
+                                                        class="ml-2 px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded">Active</span>
+                                                </p>
+                                                <p class="text-xs text-gray-500 mt-1"
+                                                    x-text="formatDate(version.created_at)"></p>
+                                            </div>
+                                            <div class="flex items-center gap-2">
+                                                <button x-show="version.status === 'draft'"
+                                                    @click="promoteVersion(version.id)"
+                                                    class="px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded">
+                                                    Promote
+                                                </button>
+                                                <button x-show="version.status !== 'active'"
+                                                    @click="revertToVersion(version.id)"
+                                                    class="px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 rounded">
+                                                    Revert
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                    <!-- TAB 3: Settings -->
+                    <div x-show="activeTab === 'settings'" class="space-y-6">
+                        <h2 class="text-xl font-semibold text-gray-800">Project Settings</h2>
+                        <div class="bg-gray-50 border border-gray-200 rounded-lg p-6 text-center">
+                            <svg class="w-12 h-12 mx-auto text-gray-300 mb-3" fill="none" stroke="currentColor"
+                                viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                                <circle cx="12" cy="12" r="3" />
+                            </svg>
+                            <h3 class="text-base font-medium text-gray-700 mb-2">Automation Settings Coming Soon</h3>
+                            <p class="text-sm text-gray-500">Auto-weekly scheduling, notifications, and compliance
+                                settings will be available in IR-4.</p>
+                        </div>
+                    </div>
+
+                    <!-- TAB 4: Mailbox -->
+                    <div x-show="activeTab === 'mailbox'" class="space-y-6">
+                        <h2 class="text-xl font-semibold text-gray-800">Public Mailbox</h2>
+                        <div class="bg-gray-50 border border-gray-200 rounded-lg p-6 text-center">
+                            <svg class="w-12 h-12 mx-auto text-gray-300 mb-3" fill="none" stroke="currentColor"
+                                viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                            </svg>
+                            <h3 class="text-base font-medium text-gray-700 mb-2">Mailbox Coming Soon</h3>
+                            <p class="text-sm text-gray-500">Public mailbox for receiving weekly reports will be
+                                available in IR-3.</p>
+                        </div>
+                    </div>
+
+                </div>
+
+            </div>
+
+        </main>
+    </div>
+
+    <script>
+        function projectDetailApp() {
+            return {
+                loading: true,
+                error: '',
+                submitting: false,
+                editMode: false,
+                saveError: '',
+                user: { display_name: '', company_id: '' },
+                project: {},
+                activeTab: 'overview',
+                versions: [],
+                activeVersion: null,
+                activeVersionData: {},
+                templateForm: {
+                    job_piece: '',
+                    contract_id: '',
+                    location_description_1: '',
+                    location_description_2: '',
+                    re_odot_contact_1: '',
+                    re_odot_contact_2: '',
+                    inspection_type: '',
+                    inspected_by: '',
+                    reviewed_by: ''
+                },
+
+                async init() {
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const projectId = urlParams.get('id');
+                    if (!projectId) {
+                        this.error = 'No project ID provided';
+                        this.loading = false;
+                        return;
+                    }
+
+                    try {
+                        const meRes = await fetch('/auth/me', { credentials: 'same-origin' });
+                        if (!meRes.ok) {
+                            window.location.href = '/auth/login';
+                            return;
+                        }
+                        this.user = await meRes.json();
+
+                        const companyId = this.user.company_id || this.extractCompanyFromMemberships();
+                        if (!companyId) {
+                            this.error = 'No company membership found';
+                            this.loading = false;
+                            return;
+                        }
+
+                        await this.loadProject(companyId, projectId);
+                        await this.loadTemplateVersions(companyId, projectId);
+                    } catch (err) {
+                        console.error('Error loading project:', err);
+                        this.error = err.message || 'Failed to load project';
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                async loadProject(companyId, projectId) {
+                    const res = await fetch(`/auth/companies/${companyId}/projects/${projectId}`, {
+                        credentials: 'same-origin'
+                    });
+                    if (!res.ok) throw new Error('Failed to load project');
+                    this.project = await res.json();
+                },
+
+                async loadTemplateVersions(companyId, projectId) {
+                    try {
+                        const res = await fetch(`/auth/companies/${companyId}/projects/${projectId}/template`, {
+                            credentials: 'same-origin'
+                        });
+                        if (res.ok) {
+                            const data = await res.json();
+                            this.versions = data.versions || [];
+
+                            if (data.active_version_id) {
+                                await this.loadActiveVersion(companyId, projectId, data.active_version_id);
+                            }
+                        }
+                    } catch (err) {
+                        console.error('Error loading template versions:', err);
+                    }
+                },
+
+                async loadActiveVersion(companyId, projectId, versionId) {
+                    try {
+                        const res = await fetch(`/auth/companies/${companyId}/projects/${projectId}/template/${versionId}`, {
+                            credentials: 'same-origin'
+                        });
+                        if (res.ok) {
+                            this.activeVersion = await res.json();
+                            this.activeVersionData = this.activeVersion.template_data || {};
+                        }
+                    } catch (err) {
+                        console.error('Error loading active version:', err);
+                    }
+                },
+
+                editTemplate() {
+                    if (this.activeVersionData) {
+                        this.templateForm = { ...this.activeVersionData };
+                    }
+                    this.editMode = true;
+                },
+
+                cancelEdit() {
+                    this.editMode = false;
+                    this.saveError = '';
+                },
+
+                async saveTemplate() {
+                    this.submitting = true;
+                    this.saveError = '';
+
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const projectId = urlParams.get('id');
+                    const companyId = this.user.company_id || this.extractCompanyFromMemberships();
+
+                    try {
+                        const res = await fetch(`/auth/companies/${companyId}/projects/${projectId}/template`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'same-origin',
+                            body: JSON.stringify({ template_data: this.templateForm })
+                        });
+
+                        if (!res.ok) {
+                            const errorData = await res.json();
+                            throw new Error(errorData.detail || 'Failed to save template');
+                        }
+
+                        await this.loadTemplateVersions(companyId, projectId);
+                        await this.loadProject(companyId, projectId);
+
+                        this.editMode = false;
+                    } catch (err) {
+                        console.error('Error saving template:', err);
+                        this.saveError = err.message || 'Failed to save template';
+                    } finally {
+                        this.submitting = false;
+                    }
+                },
+
+                async previewTemplate() {
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const projectId = urlParams.get('id');
+                    const companyId = this.user.company_id || this.extractCompanyFromMemberships();
+
+                    const url = `/auth/companies/${companyId}/projects/${projectId}/template/preview`;
+                    window.open(url, '_blank');
+                },
+
+                async promoteVersion(versionId) {
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const projectId = urlParams.get('id');
+                    const companyId = this.user.company_id || this.extractCompanyFromMemberships();
+
+                    try {
+                        const res = await fetch(`/auth/companies/${companyId}/projects/${projectId}/template/${versionId}/promote`, {
+                            method: 'POST',
+                            credentials: 'same-origin'
+                        });
+
+                        if (!res.ok) {
+                            const errorData = await res.json();
+                            throw new Error(errorData.detail || 'Failed to promote version');
+                        }
+
+                        await this.loadTemplateVersions(companyId, projectId);
+                        await this.loadProject(companyId, projectId);
+                    } catch (err) {
+                        console.error('Error promoting version:', err);
+                        alert(err.message || 'Failed to promote version');
+                    }
+                },
+
+                async revertToVersion(versionId) {
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const projectId = urlParams.get('id');
+                    const companyId = this.user.company_id || this.extractCompanyFromMemberships();
+
+                    try {
+                        const res = await fetch(`/auth/companies/${companyId}/projects/${projectId}/template/${versionId}/revert`, {
+                            method: 'POST',
+                            credentials: 'same-origin'
+                        });
+
+                        if (!res.ok) {
+                            const errorData = await res.json();
+                            throw new Error(errorData.detail || 'Failed to revert to version');
+                        }
+
+                        await this.loadTemplateVersions(companyId, projectId);
+                        await this.loadProject(companyId, projectId);
+                    } catch (err) {
+                        console.error('Error reverting to version:', err);
+                        alert(err.message || 'Failed to revert to version');
+                    }
+                },
+
+                extractCompanyFromMemberships() {
+                    if (this.user.companies && this.user.companies.length > 0) {
+                        return this.user.companies[0].id;
+                    }
+                    return null;
+                },
+
+                formatStatus(status) {
+                    const statusMap = {
+                        'active': 'Active',
+                        'setup_incomplete': 'Setup Required',
+                        'paused': 'Paused',
+                        'archived': 'Archived'
+                    };
+                    return statusMap[status] || status;
+                },
+
+                formatDate(isoDate) {
+                    if (!isoDate) return '—';
+                    try {
+                        const date = new Date(isoDate);
+                        return date.toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric'
+                        });
+                    } catch {
+                        return '—';
+                    }
+                },
+
+                async logout() {
+                    try {
+                        await fetch('/auth/logout', {
+                            method: 'POST',
+                            credentials: 'same-origin'
+                        });
+                    } finally {
+                        window.location.href = '/auth/login';
+                    }
+                }
+            };
+        }
+    </script>
+
+</body>
+
+</html>

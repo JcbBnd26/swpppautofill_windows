@@ -164,6 +164,37 @@ CREATE TABLE IF NOT EXISTS projects (
     created_by_user_id          TEXT NOT NULL REFERENCES users(id),
     UNIQUE(company_id, project_number)
 );
+
+CREATE TABLE IF NOT EXISTS project_template_versions (
+    id                      TEXT PRIMARY KEY,
+    project_id              TEXT NOT NULL REFERENCES projects(id),
+    version_number          INTEGER NOT NULL,
+    status                  TEXT NOT NULL DEFAULT 'draft',
+    template_data           TEXT NOT NULL,
+    created_at              TEXT NOT NULL,
+    created_by_user_id      TEXT NOT NULL REFERENCES users(id),
+    promoted_at             TEXT,
+    promoted_by_user_id     TEXT REFERENCES users(id),
+    superseded_at           TEXT,
+    UNIQUE(project_id, version_number)
+);
+
+CREATE TABLE IF NOT EXISTS mailbox_entries (
+    id                      TEXT PRIMARY KEY,
+    project_id              TEXT NOT NULL REFERENCES projects(id),
+    company_id              TEXT NOT NULL REFERENCES companies(id),
+    report_date             TEXT NOT NULL,
+    report_type             TEXT NOT NULL,
+    generation_mode         TEXT NOT NULL DEFAULT 'scheduled',
+    file_path               TEXT NOT NULL,
+    file_size_bytes         INTEGER,
+    template_version_id     TEXT REFERENCES project_template_versions(id),
+    rain_data_json          TEXT,
+    created_at              TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_mailbox_project
+    ON mailbox_entries(project_id, report_date DESC);
 """
 
 
@@ -1163,3 +1194,292 @@ def update_project(conn: sqlite3.Connection, project_id: str, **fields: Any) -> 
     set_clause = ", ".join(f"{k} = ?" for k in updates)
     values = list(updates.values()) + [project_id]
     conn.execute(f"UPDATE projects SET {set_clause} WHERE id = ?", values)
+
+
+# ── Project Template Versions ──────────────────────────────────────────────
+
+
+def create_template_version(
+    conn: sqlite3.Connection,
+    project_id: str,
+    created_by_user_id: str,
+    template_data: dict,
+) -> str:
+    """Create a new template version for a project.
+
+    Auto-increments version_number. If project's template_promote_mode is 'auto',
+    immediately promotes the new version to active. Otherwise leaves as draft.
+    Returns version id.
+    """
+    version_id = str(uuid.uuid4())
+
+    # Get next version number
+    max_row = conn.execute(
+        "SELECT MAX(version_number) as max_ver FROM project_template_versions WHERE project_id = ?",
+        (project_id,),
+    ).fetchone()
+    next_version = (max_row["max_ver"] or 0) + 1
+
+    # Get project's promote mode
+    project = conn.execute(
+        "SELECT template_promote_mode FROM projects WHERE id = ?",
+        (project_id,),
+    ).fetchone()
+    if not project:
+        raise ValueError(f"Project {project_id} not found")
+
+    promote_mode = project["template_promote_mode"]
+
+    # Insert new version
+    conn.execute(
+        """INSERT INTO project_template_versions
+           (id, project_id, version_number, status, template_data, created_at, created_by_user_id)
+           VALUES (?, ?, ?, 'draft', ?, ?, ?)""",
+        (
+            version_id,
+            project_id,
+            next_version,
+            json.dumps(template_data),
+            _now(),
+            created_by_user_id,
+        ),
+    )
+
+    log.info(
+        "Template version created: id=%s project_id=%s version=%d mode=%s",
+        version_id,
+        project_id,
+        next_version,
+        promote_mode,
+    )
+
+    # Auto-promote if configured
+    if promote_mode == "auto":
+        promote_template_version(conn, version_id, created_by_user_id)
+
+    return version_id
+
+
+def get_template_version(
+    conn: sqlite3.Connection, version_id: str
+) -> dict[str, Any] | None:
+    """Get a specific template version by id."""
+    row = conn.execute(
+        "SELECT * FROM project_template_versions WHERE id = ?",
+        (version_id,),
+    ).fetchone()
+    if not row:
+        return None
+    result = dict(row)
+    result["template_data"] = json.loads(result["template_data"])
+    return result
+
+
+def get_template_versions(
+    conn: sqlite3.Connection, project_id: str
+) -> list[dict[str, Any]]:
+    """Get all template versions for a project, ordered by version_number DESC."""
+    rows = conn.execute(
+        "SELECT * FROM project_template_versions WHERE project_id = ? ORDER BY version_number DESC",
+        (project_id,),
+    ).fetchall()
+    results = []
+    for row in rows:
+        r = dict(row)
+        r["template_data"] = json.loads(r["template_data"])
+        results.append(r)
+    return results
+
+
+def get_active_template_version(
+    conn: sqlite3.Connection, project_id: str
+) -> dict[str, Any] | None:
+    """Get the active template version for a project."""
+    row = conn.execute(
+        "SELECT * FROM project_template_versions WHERE project_id = ? AND status = 'active'",
+        (project_id,),
+    ).fetchone()
+    if not row:
+        return None
+    result = dict(row)
+    result["template_data"] = json.loads(result["template_data"])
+    return result
+
+
+def promote_template_version(
+    conn: sqlite3.Connection, version_id: str, promoted_by_user_id: str
+) -> None:
+    """Promote a template version to active status.
+
+    Supersedes any previously active version, updates projects.active_template_version_id,
+    and transitions project status from 'setup_incomplete' to 'active' on first promote.
+    """
+    # Get the version to promote
+    version = conn.execute(
+        "SELECT * FROM project_template_versions WHERE id = ?",
+        (version_id,),
+    ).fetchone()
+    if not version:
+        raise ValueError(f"Template version {version_id} not found")
+
+    # Check if already active
+    if version["status"] == "active":
+        raise ValueError(f"Template version {version_id} is already active")
+
+    project_id = version["project_id"]
+    now = _now()
+
+    # Supersede any currently active version
+    conn.execute(
+        """UPDATE project_template_versions
+           SET status = 'superseded', superseded_at = ?
+           WHERE project_id = ? AND status = 'active'""",
+        (now, project_id),
+    )
+
+    # Promote this version
+    conn.execute(
+        """UPDATE project_template_versions
+           SET status = 'active', promoted_at = ?, promoted_by_user_id = ?
+           WHERE id = ?""",
+        (now, promoted_by_user_id, version_id),
+    )
+
+    # Update project's active_template_version_id
+    conn.execute(
+        "UPDATE projects SET active_template_version_id = ? WHERE id = ?",
+        (version_id, project_id),
+    )
+
+    # If project status is 'setup_incomplete', change to 'active'
+    conn.execute(
+        """UPDATE projects SET status = 'active'
+           WHERE id = ? AND status = 'setup_incomplete'""",
+        (project_id,),
+    )
+
+    log.info(
+        "Template version promoted: version_id=%s project_id=%s",
+        version_id,
+        project_id,
+    )
+
+
+def archive_template_versions_for_project(
+    conn: sqlite3.Connection, project_id: str
+) -> None:
+    """Archive all template versions for a project.
+
+    Called when a project is archived.
+    """
+    conn.execute(
+        "UPDATE project_template_versions SET status = 'archived' WHERE project_id = ?",
+        (project_id,),
+    )
+    log.info("Template versions archived for project: project_id=%s", project_id)
+
+
+# ── Mailbox Entries (IR-3) ──────────────────────────────────────────────
+
+
+def create_mailbox_entry(
+    conn: sqlite3.Connection,
+    project_id: str,
+    company_id: str,
+    report_date: str,
+    report_type: str,
+    file_path: str,
+    **kwargs: Any,
+) -> str:
+    """Create a new mailbox entry.
+
+    Args:
+        project_id: Project ID
+        company_id: Company ID (for index/query optimization)
+        report_date: ISO date string (YYYY-MM-DD)
+        report_type: 'auto_weekly', 'auto_rain_event', 'manual_upload'
+        file_path: Relative path to PDF file
+        **kwargs: Optional fields (generation_mode, file_size_bytes, template_version_id, rain_data_json)
+
+    Returns:
+        Mailbox entry ID (UUID)
+    """
+    entry_id = str(uuid.uuid4())
+    now = _now()
+
+    generation_mode = kwargs.get("generation_mode", "scheduled")
+    file_size_bytes = kwargs.get("file_size_bytes")
+    template_version_id = kwargs.get("template_version_id")
+    rain_data_json = kwargs.get("rain_data_json")
+
+    conn.execute(
+        """INSERT INTO mailbox_entries
+           (id, project_id, company_id, report_date, report_type, generation_mode,
+            file_path, file_size_bytes, template_version_id, rain_data_json, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            entry_id,
+            project_id,
+            company_id,
+            report_date,
+            report_type,
+            generation_mode,
+            file_path,
+            file_size_bytes,
+            template_version_id,
+            rain_data_json,
+            now,
+        ),
+    )
+
+    log.info(
+        "Mailbox entry created: entry_id=%s project_id=%s report_date=%s type=%s",
+        entry_id,
+        project_id,
+        report_date,
+        report_type,
+    )
+    return entry_id
+
+
+def get_mailbox_entry(conn: sqlite3.Connection, entry_id: str) -> dict[str, Any] | None:
+    """Get a single mailbox entry by ID."""
+    row = conn.execute(
+        "SELECT * FROM mailbox_entries WHERE id = ?",
+        (entry_id,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def get_mailbox_entries(
+    conn: sqlite3.Connection, project_id: str, sort_order: str = "desc"
+) -> list[dict[str, Any]]:
+    """Get all mailbox entries for a project.
+
+    Args:
+        project_id: Project ID
+        sort_order: 'desc' (newest first, default) or 'asc' (oldest first)
+
+    Returns:
+        List of mailbox entries sorted by report_date
+    """
+    if sort_order not in ("desc", "asc"):
+        raise ValueError(f"Invalid sort_order '{sort_order}'. Must be 'desc' or 'asc'")
+
+    order_clause = "DESC" if sort_order == "desc" else "ASC"
+
+    rows = conn.execute(
+        f"SELECT * FROM mailbox_entries WHERE project_id = ? ORDER BY report_date {order_clause}",
+        (project_id,),
+    ).fetchall()
+
+    return [dict(row) for row in rows]
+
+
+def get_mailbox_entry_count(conn: sqlite3.Connection, project_id: str) -> int:
+    """Get count of mailbox entries for a project."""
+    row = conn.execute(
+        "SELECT COUNT(*) as count FROM mailbox_entries WHERE project_id = ?",
+        (project_id,),
+    ).fetchone()
+    return row["count"] if row else 0

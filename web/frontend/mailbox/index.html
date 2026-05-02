@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SWPPP Mailbox</title>
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.5/dist/cdn.min.js" defer></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-gray-50 min-h-screen">
+    <div x-data="mailboxApp()" x-init="init()" class="max-w-4xl mx-auto p-4">
+        <!-- Header -->
+        <header class="mb-6">
+            <h1 class="text-2xl font-bold text-gray-900 mb-2">SWPPP Mailbox</h1>
+            <p class="text-sm text-gray-600">Public inspection reports</p>
+        </header>
+
+        <!-- Search State -->
+        <div x-show="state === 'search'" class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-lg font-semibold mb-4">Find Your Project</h2>
+
+            <form @submit.prevent="searchProject">
+                <div class="mb-4">
+                    <label for="projectNumber" class="block text-sm font-medium text-gray-700 mb-2">
+                        Project Number
+                    </label>
+                    <input type="text" id="projectNumber" x-model="searchNumber"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="Enter project number" required>
+                </div>
+
+                <button type="submit"
+                    class="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    :disabled="loading">
+                    <span x-show="!loading">Search</span>
+                    <span x-show="loading">Searching...</span>
+                </button>
+            </form>
+
+            <!-- Error Message -->
+            <div x-show="errorMessage" class="mt-4 p-4 bg-red-50 border border-red-200 rounded-md">
+                <p class="text-sm text-red-800" x-text="errorMessage"></p>
+            </div>
+
+            <!-- Recent Projects (from cookie) -->
+            <div x-show="recentProject" class="mt-6 pt-6 border-t border-gray-200">
+                <h3 class="text-sm font-medium text-gray-700 mb-2">Recent Project</h3>
+                <button @click="loadRecentProject" class="text-blue-600 hover:text-blue-800 text-sm"
+                    x-text="recentProject"></button>
+            </div>
+        </div>
+
+        <!-- Active Project View -->
+        <div x-show="state === 'active'" class="space-y-6">
+            <!-- Project Header -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="flex justify-between items-start mb-2">
+                    <div>
+                        <h2 class="text-xl font-bold text-gray-900" x-text="activeProject.project_number"></h2>
+                        <p class="text-sm text-gray-600" x-text="activeProject.project_name"></p>
+                    </div>
+                    <button @click="backToSearch" class="text-sm text-blue-600 hover:text-blue-800">
+                        Change Project
+                    </button>
+                </div>
+                <p class="text-sm text-gray-500" x-text="activeProject.site_address"></p>
+                <p class="text-sm text-gray-500 mt-2">
+                    <span x-text="activeProject.entry_count"></span> reports available
+                </p>
+            </div>
+
+            <!-- Download All Button -->
+            <div x-show="activeProject.entry_count > 0">
+                <button @click="downloadAll"
+                    class="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500"
+                    :disabled="loading">
+                    <span x-show="!loading">Download All Reports (ZIP)</span>
+                    <span x-show="loading">Preparing download...</span>
+                </button>
+            </div>
+
+            <!-- Entries List -->
+            <div x-show="activeProject.entries && activeProject.entries.length > 0" class="space-y-3">
+                <h3 class="text-lg font-semibold text-gray-900">Reports</h3>
+
+                <template x-for="entry in activeProject.entries" :key="entry.id">
+                    <div class="bg-white rounded-lg shadow p-4 flex justify-between items-center">
+                        <div class="flex-1">
+                            <p class="font-medium text-gray-900" x-text="formatDate(entry.report_date)"></p>
+                            <p class="text-sm text-gray-600">
+                                <span x-text="formatReportType(entry.report_type)"></span>
+                                <template x-if="entry.file_size_bytes">
+                                    <span> • <span x-text="formatFileSize(entry.file_size_bytes)"></span></span>
+                                </template>
+                            </p>
+                        </div>
+                        <button @click="downloadEntry(entry.id)"
+                            class="ml-4 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+                            Download
+                        </button>
+                    </div>
+                </template>
+            </div>
+
+            <!-- No Entries Message -->
+            <div x-show="!activeProject.entries || activeProject.entries.length === 0"
+                class="bg-white rounded-lg shadow p-6 text-center">
+                <p class="text-gray-600">No reports available yet.</p>
+            </div>
+        </div>
+
+        <!-- Loading State -->
+        <div x-show="loading && state !== 'search' && state !== 'active'"
+            class="bg-white rounded-lg shadow p-6 text-center">
+            <p class="text-gray-600">Loading...</p>
+        </div>
+    </div>
+
+    <script>
+        function mailboxApp() {
+            return {
+                // State
+                state: 'search', // 'search' | 'active'
+                loading: false,
+                errorMessage: '',
+                searchNumber: '',
+                recentProject: '',
+                activeProject: null,
+
+                // Lifecycle
+                init() {
+                    // Load recent project from cookie
+                    this.recentProject = this.getCookie('mailbox_project_number');
+                },
+
+                // Actions
+                async searchProject() {
+                    this.loading = true;
+                    this.errorMessage = '';
+
+                    try {
+                        const response = await fetch(`/mailbox/${encodeURIComponent(this.searchNumber)}`);
+
+                        if (!response.ok) {
+                            if (response.status === 404) {
+                                this.errorMessage = 'Project not found. Please check the project number.';
+                            } else {
+                                this.errorMessage = 'An error occurred. Please try again.';
+                            }
+                            return;
+                        }
+
+                        const data = await response.json();
+                        this.activeProject = data;
+                        this.state = 'active';
+
+                        // Save to cookie
+                        this.setCookie('mailbox_project_number', this.searchNumber, 365);
+                        this.recentProject = this.searchNumber;
+
+                    } catch (error) {
+                        console.error('Search error:', error);
+                        this.errorMessage = 'Network error. Please check your connection.';
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                async loadRecentProject() {
+                    this.searchNumber = this.recentProject;
+                    await this.searchProject();
+                },
+
+                backToSearch() {
+                    this.state = 'search';
+                    this.searchNumber = '';
+                    this.errorMessage = '';
+                    this.activeProject = null;
+                },
+
+                async downloadEntry(entryId) {
+                    const projectNumber = this.activeProject.project_number;
+                    window.location.href = `/mailbox/${encodeURIComponent(projectNumber)}/download/${entryId}`;
+                },
+
+                async downloadAll() {
+                    this.loading = true;
+
+                    try {
+                        const projectNumber = this.activeProject.project_number;
+                        window.location.href = `/mailbox/${encodeURIComponent(projectNumber)}/download/all`;
+                    } catch (error) {
+                        console.error('Download error:', error);
+                        alert('Download failed. Please try again.');
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                // Utilities
+                formatDate(isoDate) {
+                    const date = new Date(isoDate);
+                    return date.toLocaleDateString('en-US', {
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric'
+                    });
+                },
+
+                formatReportType(type) {
+                    const typeMap = {
+                        'auto_weekly': 'Weekly Report',
+                        'auto_rain_event': 'Rain Event Report',
+                        'manual_upload': 'Manual Upload'
+                    };
+                    return typeMap[type] || type;
+                },
+
+                formatFileSize(bytes) {
+                    if (!bytes) return '';
+                    const kb = bytes / 1024;
+                    if (kb < 1024) {
+                        return `${Math.round(kb)} KB`;
+                    }
+                    const mb = kb / 1024;
+                    return `${mb.toFixed(1)} MB`;
+                },
+
+                getCookie(name) {
+                    const value = `; ${document.cookie}`;
+                    const parts = value.split(`; ${name}=`);
+                    if (parts.length === 2) {
+                        return parts.pop().split(';').shift();
+                    }
+                    return '';
+                },
+
+                setCookie(name, value, days) {
+                    const expires = new Date();
+                    expires.setTime(expires.getTime() + days * 24 * 60 * 60 * 1000);
+                    document.cookie = `${name}=${value};expires=${expires.toUTCString()};path=/`;
+                }
+            };
+        }
+    </script>
+</body>
+
+</html>

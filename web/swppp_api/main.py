@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import logging
 import os
@@ -21,6 +22,8 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import FileResponse, HTMLResponse
+from pypdf import PdfReader, PdfWriter, Transformation
+from pypdf.generic import NameObject
 
 from web.auth.dependencies import require_app
 from web.log_config import configure_logging
@@ -139,6 +142,62 @@ def _validate_session_name(name: str) -> None:
                 "underscores, hyphens, and periods"
             ),
         )
+
+
+def add_preview_watermark(pdf_bytes: bytes) -> bytes:
+    """Add "PREVIEW — NOT FILED" watermark diagonally across every page.
+
+    Takes PDF bytes as input, returns watermarked PDF bytes.
+    The watermark is semi-transparent and rotated 45 degrees.
+    """
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    writer = PdfWriter()
+
+    for page in reader.pages:
+        # Get page dimensions
+        media_box = page.mediabox
+        width = float(media_box.width)
+        height = float(media_box.height)
+
+        # Calculate center position for diagonal watermark
+        center_x = width / 2
+        center_y = height / 2
+
+        # Create watermark text annotation
+        # Using pypdf's transformation to rotate text 45 degrees
+        watermark_text = "PREVIEW — NOT FILED"
+
+        # Add watermark as content stream overlay
+        # Create a transformation matrix for diagonal placement
+        transform = Transformation().rotate(45).translate(center_x, center_y)
+
+        # Create a simple watermark overlay
+        # Note: pypdf 6.10.2 supports adding annotations and transformations
+        # For a visible watermark, we add it to the content stream
+        watermark_content = (
+            f"q\n"  # Save graphics state
+            f"BT\n"  # Begin text
+            f"/Helvetica 60 Tf\n"  # Font and size
+            f"0.8 g\n"  # Gray color (80% gray for semi-transparency effect)
+            f"1 0 0 1 {center_x - 200} {center_y} Tm\n"  # Text matrix (position)
+            f"45 rotate\n"  # Rotate 45 degrees
+            f"({watermark_text}) Tj\n"  # Show text
+            f"ET\n"  # End text
+            f"Q\n"  # Restore graphics state
+        ).encode()
+
+        # Merge watermark with page content
+        # Add watermark to page's content stream
+        if "/Contents" in page:
+            # Append watermark to existing content
+            page[NameObject("/Contents")].append_filtered_stream(watermark_content)
+
+        writer.add_page(page)
+
+    # Write to bytes
+    output_buffer = io.BytesIO()
+    writer.write(output_buffer)
+    return output_buffer.getvalue()
 
 
 # ── GET /swppp/api/health ────────────────────────────────────────────────

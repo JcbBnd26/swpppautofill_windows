@@ -354,3 +354,89 @@ class ProjectUpdateRequest(BaseModel):
     template_promote_mode: str | None = None
     status: str | None = None
     paused_until: str | None = None
+
+
+# ── Project Template Versions ────────────────────────────────────────────
+
+
+class TemplateVersionData(BaseModel):
+    """Template data payload — SWPPP form fields stored in template_data column."""
+
+    # Core project fields (mirrors SWPPP form fields from odot_mapping.yaml)
+    job_piece: str | None = Field(default=None, max_length=200)
+    project_number: str | None = Field(default=None, max_length=100)
+    contract_id: str | None = Field(default=None, max_length=100)
+    location_description_1: str | None = Field(default=None, max_length=400)
+    location_description_2: str | None = Field(default=None, max_length=400)
+    re_odot_contact_1: str | None = Field(default=None, max_length=200)
+    re_odot_contact_2: str | None = Field(default=None, max_length=200)
+    inspection_type: str | None = Field(default=None, max_length=100)
+    inspected_by: str | None = Field(default=None, max_length=200)
+    reviewed_by: str | None = Field(default=None, max_length=200)
+    # Checkbox group defaults — JSON-serializable dict
+    checkboxes: dict = Field(default_factory=dict)
+    # Any additional SWPPP fields from odot_mapping.yaml
+    extra_fields: dict = Field(default_factory=dict)
+
+
+class TemplateSaveRequest(BaseModel):
+    """Request to save a new template version."""
+
+    template_data: TemplateVersionData
+
+
+class TemplateVersionInfo(BaseModel):
+    """Template version metadata (without template_data)."""
+
+    id: str
+    project_id: str
+    version_number: int
+    status: str
+    created_at: str
+    created_by_user_id: str
+    promoted_at: str | None
+    promoted_by_user_id: str | None
+    superseded_at: str | None
+
+
+class TemplateVersionDetail(TemplateVersionInfo):
+    """Template version with full template_data included."""
+
+    template_data: dict
+
+
+class TemplateVersionListResponse(BaseModel):
+    """Response containing all versions for a project."""
+
+    versions: list[TemplateVersionInfo]
+    active_version_id: str | None
+
+
+class TemplatePromoteModeRequest(BaseModel):
+    """Request to update template promote mode (auto or manual)."""
+
+    template_promote_mode: str  # 'auto' or 'manual'
+
+
+# ── Mailbox Entries (IR-3) ──────────────────────────────────────────────
+
+
+class MailboxEntryPublic(BaseModel):
+    """Public mailbox entry (no auth required)."""
+
+    id: str
+    report_date: str
+    report_type: str
+    generation_mode: str
+    file_size_bytes: int | None
+    created_at: str
+
+
+class MailboxProjectView(BaseModel):
+    """Public project view for mailbox (no auth required)."""
+
+    project_number: str
+    project_name: str
+    site_address: str
+    entry_count: int
+    entries: list[MailboxEntryPublic]

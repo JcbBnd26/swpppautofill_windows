@@ -47,6 +47,8 @@ from web.auth.models import (
     InviteListResponse,
     LoginRequest,
     LoginResponse,
+    MailboxEntryPublic,
+    MailboxProjectView,
     MeResponse,
     PatchAppRequest,
     PatchUserRequest,
@@ -60,6 +62,11 @@ from web.auth.models import (
     SessionListResponse,
     SetPasswordRequest,
     SuccessResponse,
+    TemplatePromoteModeRequest,
+    TemplateSaveRequest,
+    TemplateVersionDetail,
+    TemplateVersionInfo,
+    TemplateVersionListResponse,
     UserInfo,
     UserListResponse,
 )
@@ -79,6 +86,69 @@ FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend" / "portal"
 DEV_MODE = os.environ.get("TOOLS_DEV_MODE", "0") == "1"
 BASE_URL = os.environ.get("TOOLS_BASE_URL", "http://localhost:8001")
 COOKIE_MAX_AGE = 90 * 24 * 60 * 60  # 90 days
+
+
+# ── Helper Functions ──────────────────────────────────────────────────
+
+
+def _resolve_mailbox_file_path(relative_path: str) -> Path:
+    """Resolve a mailbox file path from relative to absolute.
+
+    Args:
+        relative_path: Relative path from mailbox entries table (e.g. "company123/project456/2026-05-01.pdf")
+
+    Returns:
+        Absolute path to the file
+    """
+    # Get data directory from environment or use default.
+    data_dir = Path(os.environ.get("TOOLS_DATA_DIR", "web/data"))
+    mailbox_root = data_dir / "mailbox"
+
+    # Resolve relative path safely (prevent directory traversal).
+    file_path = (mailbox_root / relative_path).resolve()
+
+    # Ensure resolved path is still within mailbox root.
+    if not str(file_path).startswith(str(mailbox_root.resolve())):
+        raise ValueError(f"Invalid file path: {relative_path}")
+
+    return file_path
+
+
+def _generate_batch_zip(entries: list[dict[str, Any]], project_number: str) -> bytes:
+    """Generate a ZIP file containing multiple mailbox entries.
+
+    Args:
+        entries: List of mailbox entry dicts
+        project_number: Project number for filename generation
+
+    Returns:
+        ZIP file as bytes (in-memory)
+    """
+    from io import BytesIO
+    from zipfile import ZipFile, ZIP_DEFLATED
+
+    zip_buffer = BytesIO()
+
+    with ZipFile(zip_buffer, "w", ZIP_DEFLATED) as zipf:
+        for entry in entries:
+            file_path = _resolve_mailbox_file_path(entry["file_path"])
+
+            if not file_path.exists():
+                log.warning(
+                    "Mailbox file not found in batch: path=%s entry_id=%s",
+                    file_path,
+                    entry["id"],
+                )
+                continue
+
+            # Use report_date for filename.
+            filename = f"swppp_{entry['report_date']}.pdf"
+
+            # Add file to ZIP.
+            zipf.write(file_path, arcname=filename)
+
+    zip_buffer.seek(0)
+    return zip_buffer.read()
 
 
 @asynccontextmanager
@@ -1145,6 +1215,592 @@ def update_project_settings(
         )
 
     return SuccessResponse()
+
+
+# ── Project Template Versions (IR-2) ─────────────────────────────────────
+
+
+@app.post("/companies/{company_id}/projects/{project_id}/template", status_code=201)
+def save_template_version(
+    company_id: str,
+    project_id: str,
+    body: TemplateSaveRequest,
+    user: dict[str, Any] = Depends(get_current_user),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    """Save a new template version. Auto or manual promote based on project setting."""
+    # Verify company membership (or platform admin).
+    if not user.get("is_platform_admin"):
+        membership = db.get_company_user(conn, user["id"], company_id)
+        if not membership:
+            raise HTTPException(status_code=403, detail="Not a member of this company")
+        # Only company_admin and pm can save templates.
+        if membership["role"] not in ("company_admin", "pm"):
+            raise HTTPException(
+                status_code=403,
+                detail="Template save requires company_admin or pm role",
+            )
+
+    # Verify project exists and belongs to company (tenant isolation).
+    project = db.get_project_for_company(conn, project_id, company_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Create template version.
+    template_data = body.template_data.model_dump()
+    version_id = db.create_template_version(
+        conn,
+        project_id=project_id,
+        created_by_user_id=user["id"],
+        template_data=template_data,
+    )
+
+    log.info(
+        "Template version saved: version_id=%s project_id=%s by=%s",
+        version_id,
+        project_id,
+        user["id"],
+    )
+    return {"id": version_id}
+
+
+@app.get("/companies/{company_id}/projects/{project_id}/template")
+def get_template_versions(
+    company_id: str,
+    project_id: str,
+    user: dict[str, Any] = Depends(get_current_user),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    """Get all template versions for a project. Requires company membership."""
+    # Verify company membership (or platform admin).
+    if not user.get("is_platform_admin"):
+        membership = db.get_company_user(conn, user["id"], company_id)
+        if not membership:
+            raise HTTPException(status_code=403, detail="Not a member of this company")
+
+    # Verify project exists and belongs to company (tenant isolation).
+    project = db.get_project_for_company(conn, project_id, company_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Get all versions.
+    versions = db.get_template_versions(conn, project_id)
+    version_infos = [
+        TemplateVersionInfo(
+            id=v["id"],
+            project_id=v["project_id"],
+            version_number=v["version_number"],
+            status=v["status"],
+            created_at=v["created_at"],
+            created_by_user_id=v["created_by_user_id"],
+            promoted_at=v["promoted_at"],
+            promoted_by_user_id=v["promoted_by_user_id"],
+            superseded_at=v["superseded_at"],
+        )
+        for v in versions
+    ]
+
+    return TemplateVersionListResponse(
+        versions=version_infos,
+        active_version_id=project["active_template_version_id"],
+    )
+
+
+@app.get("/companies/{company_id}/projects/{project_id}/template/{version_id}")
+def get_template_version_detail(
+    company_id: str,
+    project_id: str,
+    version_id: str,
+    user: dict[str, Any] = Depends(get_current_user),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    """Get specific template version detail including template_data."""
+    # Verify company membership (or platform admin).
+    if not user.get("is_platform_admin"):
+        membership = db.get_company_user(conn, user["id"], company_id)
+        if not membership:
+            raise HTTPException(status_code=403, detail="Not a member of this company")
+
+    # Verify project exists and belongs to company (tenant isolation).
+    project = db.get_project_for_company(conn, project_id, company_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Get version.
+    version = db.get_template_version(conn, version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail="Template version not found")
+
+    # Verify version belongs to this project (tenant isolation).
+    if version["project_id"] != project_id:
+        raise HTTPException(status_code=404, detail="Template version not found")
+
+    return TemplateVersionDetail(**version)
+
+
+@app.post("/companies/{company_id}/projects/{project_id}/template/{version_id}/promote")
+def promote_template_version_endpoint(
+    company_id: str,
+    project_id: str,
+    version_id: str,
+    user: dict[str, Any] = Depends(get_current_user),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    """Manually promote a draft template version to active."""
+    # Verify company membership (or platform admin).
+    if not user.get("is_platform_admin"):
+        membership = db.get_company_user(conn, user["id"], company_id)
+        if not membership:
+            raise HTTPException(status_code=403, detail="Not a member of this company")
+        # Only company_admin and pm can promote templates.
+        if membership["role"] not in ("company_admin", "pm"):
+            raise HTTPException(
+                status_code=403,
+                detail="Template promote requires company_admin or pm role",
+            )
+
+    # Verify project exists and belongs to company (tenant isolation).
+    project = db.get_project_for_company(conn, project_id, company_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Get version.
+    version = db.get_template_version(conn, version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail="Template version not found")
+
+    # Verify version belongs to this project (tenant isolation).
+    if version["project_id"] != project_id:
+        raise HTTPException(status_code=404, detail="Template version not found")
+
+    # Promote version.
+    try:
+        db.promote_template_version(conn, version_id, user["id"])
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    log.info(
+        "Template version promoted: version_id=%s project_id=%s by=%s",
+        version_id,
+        project_id,
+        user["id"],
+    )
+    return SuccessResponse()
+
+
+@app.post(
+    "/companies/{company_id}/projects/{project_id}/template/{version_id}/revert",
+    status_code=201,
+)
+def revert_template_version(
+    company_id: str,
+    project_id: str,
+    version_id: str,
+    user: dict[str, Any] = Depends(get_current_user),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    """Revert to a previous template version by creating a new version with old data."""
+    # Verify company membership (or platform admin).
+    if not user.get("is_platform_admin"):
+        membership = db.get_company_user(conn, user["id"], company_id)
+        if not membership:
+            raise HTTPException(status_code=403, detail="Not a member of this company")
+        # Only company_admin and pm can revert templates.
+        if membership["role"] not in ("company_admin", "pm"):
+            raise HTTPException(
+                status_code=403,
+                detail="Template revert requires company_admin or pm role",
+            )
+
+    # Verify project exists and belongs to company (tenant isolation).
+    project = db.get_project_for_company(conn, project_id, company_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Get old version.
+    old_version = db.get_template_version(conn, version_id)
+    if not old_version:
+        raise HTTPException(status_code=404, detail="Template version not found")
+
+    # Verify version belongs to this project (tenant isolation).
+    if old_version["project_id"] != project_id:
+        raise HTTPException(status_code=404, detail="Template version not found")
+
+    # Create new version with old template_data.
+    new_version_id = db.create_template_version(
+        conn,
+        project_id=project_id,
+        created_by_user_id=user["id"],
+        template_data=old_version["template_data"],
+    )
+
+    log.info(
+        "Template version reverted: new_version=%s old_version=%s project_id=%s by=%s",
+        new_version_id,
+        version_id,
+        project_id,
+        user["id"],
+    )
+    return {"id": new_version_id}
+
+
+@app.get("/companies/{company_id}/projects/{project_id}/template/preview")
+def preview_template(
+    company_id: str,
+    project_id: str,
+    user: dict[str, Any] = Depends(get_current_user),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    """Generate a watermarked preview PDF from the active template version."""
+    from datetime import date, timedelta
+    from pathlib import Path
+    import tempfile
+    import shutil
+
+    # Verify company membership (or platform admin).
+    if not user.get("is_platform_admin"):
+        membership = db.get_company_user(conn, user["id"], company_id)
+        if not membership:
+            raise HTTPException(status_code=403, detail="Not a member of this company")
+
+    # Verify project exists and belongs to company (tenant isolation).
+    project = db.get_project_for_company(conn, project_id, company_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Get active template version.
+    active_version = db.get_active_template_version(conn, project_id)
+    if not active_version:
+        raise HTTPException(
+            status_code=400,
+            detail="No active template version. Please save a template first.",
+        )
+
+    # Import SWPPP generation functions
+    try:
+        from app.core.config_manager import (
+            build_project_info,
+            build_run_options,
+            load_mapping,
+        )
+        from app.core.dates import weekly_dates
+        from app.core.fill import generate_batch
+        from web.swppp_api.main import add_preview_watermark, TEMPLATE_PDF, MAPPING_YAML
+    except ImportError as exc:
+        log.error("Failed to import SWPPP generation modules: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail="Preview generation unavailable",
+        )
+
+    # Convert template_data to project_fields format
+    template_data = active_version["template_data"]
+    project_fields = {}
+
+    # Map named fields from TemplateVersionData
+    field_names = [
+        "job_piece",
+        "project_number",
+        "contract_id",
+        "location_description_1",
+        "location_description_2",
+        "re_odot_contact_1",
+        "re_odot_contact_2",
+        "inspection_type",
+        "inspected_by",
+        "reviewed_by",
+    ]
+    for field_name in field_names:
+        value = template_data.get(field_name)
+        if value is not None:
+            project_fields[field_name] = str(value)
+
+    # Add extra_fields if present
+    extra_fields = template_data.get("extra_fields", {})
+    if extra_fields:
+        project_fields.update(extra_fields)
+
+    # Get checkboxes if present
+    checkbox_states = template_data.get("checkboxes", {})
+
+    # Calculate next Monday (start of next inspection week)
+    today = date.today()
+    days_until_monday = (7 - today.weekday()) % 7
+    if days_until_monday == 0:
+        days_until_monday = 7  # If today is Monday, get next Monday
+    next_monday = today + timedelta(days=days_until_monday)
+
+    # Generate preview for next week only
+    tmpdir = tempfile.mkdtemp(prefix="swppp_preview_")
+
+    try:
+        mapping = load_mapping(MAPPING_YAML)
+        project_obj = build_project_info(project_fields)
+        options = build_run_options(
+            output_dir=tmpdir,
+            start_date=next_monday.isoformat(),
+            end_date=next_monday.isoformat(),
+            make_zip=False,
+        )
+
+        dates = [next_monday]
+
+        created = generate_batch(
+            template_path=str(TEMPLATE_PDF),
+            project=project_obj,
+            options=options,
+            dates=dates,
+            mapping=mapping,
+            checkbox_states=checkbox_states or None,
+            notes_texts=None,
+        )
+
+        if not created:
+            raise HTTPException(
+                status_code=500,
+                detail="PDF generation produced no output",
+            )
+
+        # Read the generated PDF
+        pdf_path = Path(created[0])
+        if not pdf_path.exists():
+            raise HTTPException(
+                status_code=500,
+                detail="Generated PDF not found",
+            )
+
+        pdf_bytes = pdf_path.read_bytes()
+
+        # Apply watermark
+        watermarked_pdf = add_preview_watermark(pdf_bytes)
+
+        # Clean up temp directory
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+        # Return watermarked PDF
+        return Response(
+            content=watermarked_pdf,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'inline; filename="preview_{next_monday.isoformat()}.pdf"'
+            },
+        )
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.error("Preview generation failed: %s", exc, exc_info=True)
+        # Clean up on error
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Preview generation failed: {str(exc)}",
+        )
+
+
+# ── Public Mailbox (IR-3) ─────────────────────────────────────────────
+# All endpoints are fully public with no authentication required.
+
+
+@app.get("/mailbox/{project_number}")
+def get_mailbox_for_project(
+    project_number: str,
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    """Get mailbox entries for a project (public, no auth)."""
+    # Find project by project_number (globally unique).
+    project = conn.execute(
+        "SELECT id, project_number, project_name, site_address, company_id FROM projects WHERE project_number = ?",
+        (project_number,),
+    ).fetchone()
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Get mailbox entries.
+    entries = db.get_mailbox_entries(conn, project["id"], sort_order="desc")
+
+    # Convert to public model (hide internal fields).
+    public_entries = [
+        MailboxEntryPublic(
+            id=entry["id"],
+            report_date=entry["report_date"],
+            report_type=entry["report_type"],
+            generation_mode=entry["generation_mode"],
+            file_size_bytes=entry["file_size_bytes"],
+            created_at=entry["created_at"],
+        )
+        for entry in entries
+    ]
+
+    # Get entry count.
+    entry_count = db.get_mailbox_entry_count(conn, project["id"])
+
+    return MailboxProjectView(
+        project_number=project["project_number"],
+        project_name=project["project_name"],
+        site_address=project["site_address"],
+        entry_count=entry_count,
+        entries=public_entries,
+    )
+
+
+@app.get("/mailbox/{project_number}/download/{entry_id}")
+def download_mailbox_entry(
+    project_number: str,
+    entry_id: str,
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    """Download a single mailbox entry PDF (public, no auth)."""
+    # Verify project exists.
+    project = conn.execute(
+        "SELECT id FROM projects WHERE project_number = ?",
+        (project_number,),
+    ).fetchone()
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Get mailbox entry.
+    entry = db.get_mailbox_entry(conn, entry_id)
+
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entry not found")
+
+    # Verify entry belongs to project (tenant isolation).
+    if entry["project_id"] != project["id"]:
+        raise HTTPException(status_code=404, detail="Entry not found")
+
+    # Resolve file path and serve file.
+    file_path = _resolve_mailbox_file_path(entry["file_path"])
+
+    if not file_path.exists():
+        log.error("Mailbox file not found: path=%s entry_id=%s", file_path, entry_id)
+        raise HTTPException(status_code=404, detail="File not found")
+
+    # Determine filename from report_date.
+    filename = f"swppp_{entry['report_date']}.pdf"
+
+    return FileResponse(
+        path=str(file_path),
+        media_type="application/pdf",
+        filename=filename,
+    )
+
+
+@app.post("/mailbox/{project_number}/download/batch")
+async def download_batch_mailbox_entries(
+    project_number: str,
+    request: Request,
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    """Download multiple entries as a ZIP file (public, no auth).
+
+    Request body: {"entry_ids": ["id1", "id2", ...]}
+    Max 50 entries per batch.
+    """
+    import json
+
+    # Parse request body.
+    try:
+        body_bytes = await request.body()
+        body = json.loads(body_bytes)
+        entry_ids = body.get("entry_ids", [])
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid request body")
+
+    if not entry_ids:
+        raise HTTPException(status_code=400, detail="No entry_ids provided")
+
+    if len(entry_ids) > 50:
+        raise HTTPException(status_code=400, detail="Maximum 50 entries per batch")
+
+    # Verify project exists.
+    project = conn.execute(
+        "SELECT id FROM projects WHERE project_number = ?",
+        (project_number,),
+    ).fetchone()
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Fetch entries and verify they all belong to this project.
+    entries = []
+    for entry_id in entry_ids:
+        entry = db.get_mailbox_entry(conn, entry_id)
+        if not entry:
+            raise HTTPException(status_code=404, detail=f"Entry {entry_id} not found")
+        if entry["project_id"] != project["id"]:
+            raise HTTPException(status_code=404, detail=f"Entry {entry_id} not found")
+        entries.append(entry)
+
+    # Generate ZIP in memory.
+    zip_bytes = _generate_batch_zip(entries, project_number)
+
+    # Return ZIP file.
+    filename = f"swppp_{project_number}_batch.zip"
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/mailbox/{project_number}/download/all")
+def download_all_mailbox_entries(
+    project_number: str,
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    """Download all entries as a ZIP file (public, no auth)."""
+    # Verify project exists.
+    project = conn.execute(
+        "SELECT id FROM projects WHERE project_number = ?",
+        (project_number,),
+    ).fetchone()
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Get all mailbox entries.
+    entries = db.get_mailbox_entries(conn, project["id"], sort_order="desc")
+
+    if not entries:
+        raise HTTPException(status_code=404, detail="No entries found")
+
+    # Generate ZIP in memory.
+    zip_bytes = _generate_batch_zip(entries, project_number)
+
+    # Return ZIP file.
+    filename = f"swppp_{project_number}_all.zip"
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/not")
+def serve_not_file(conn: sqlite3.Connection = Depends(db.get_db)):
+    """Serve the NOT file (public, no auth).
+
+    Looks up project by cookie 'mailbox_project_number' or returns 404.
+    """
+    # This endpoint is optional and may not be implemented in initial version.
+    # For now, return 501 Not Implemented.
+    raise HTTPException(status_code=501, detail="NOT endpoint not yet implemented")
+
+
+@app.get("/mailbox", response_class=HTMLResponse)
+def serve_mailbox_html():
+    """Serve the public mailbox HTML frontend (no auth)."""
+    html_path = (
+        Path(__file__).resolve().parent.parent / "frontend" / "mailbox" / "index.html"
+    )
+
+    if not html_path.exists():
+        raise HTTPException(status_code=404, detail="Mailbox HTML not found")
+
+    return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
 
 
 # ── Platform Admin: Company List ─────────────────────────────────────────

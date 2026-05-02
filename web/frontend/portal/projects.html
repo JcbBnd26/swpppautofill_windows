@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Projects | Company Tools</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+</head>
+
+<body class="bg-gray-100 min-h-screen">
+
+    <div x-data="projectListApp()" x-init="init()">
+
+        <!-- Header -->
+        <header class="bg-white shadow-sm">
+            <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+                <div class="flex items-center gap-4">
+                    <a href="/" class="text-blue-600 hover:underline text-sm">← Back</a>
+                    <h1 class="text-lg font-semibold text-gray-800">Projects</h1>
+                </div>
+                <div class="flex items-center gap-4 text-sm text-gray-600">
+                    <span x-text="user.display_name"></span>
+                    <button @click="logout()" class="text-red-600 hover:underline">Logout</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Loading -->
+        <div x-show="loading" class="text-center mt-20 text-gray-500">Loading projects…</div>
+
+        <!-- Error -->
+        <div x-show="error" class="max-w-7xl mx-auto px-6 py-10">
+            <div class="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700" x-text="error"></div>
+        </div>
+
+        <!-- Projects Table -->
+        <main x-show="!loading && !error" class="max-w-7xl mx-auto px-6 py-10">
+
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-xl font-semibold text-gray-800">Your Projects</h2>
+                <a href="/portal/project-new.html"
+                    class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition">
+                    + New Project
+                </a>
+            </div>
+
+            <!-- Empty State -->
+            <div x-show="projects.length === 0" class="bg-white rounded-xl border border-gray-200 p-12 text-center">
+                <svg class="w-16 h-16 mx-auto text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <h3 class="text-lg font-medium text-gray-700 mb-2">No projects yet</h3>
+                <p class="text-sm text-gray-500 mb-6">Create your first project to get started with automated weekly
+                    reports.</p>
+                <a href="/portal/project-new.html"
+                    class="inline-block bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg text-sm font-medium transition">
+                    Create Your First Project
+                </a>
+            </div>
+
+            <!-- Projects Table -->
+            <div x-show="projects.length > 0" class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                <table class="w-full">
+                    <thead class="bg-gray-50 border-b border-gray-200">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Project Number
+                            </th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Project Name
+                            </th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Status
+                            </th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Last Report
+                            </th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Next Due
+                            </th>
+                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Actions
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200">
+                        <template x-for="project in projects" :key="project.id">
+                            <tr class="hover:bg-gray-50 transition">
+                                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                    <span x-text="project.project_number"></span>
+                                </td>
+                                <td class="px-6 py-4 text-sm text-gray-700">
+                                    <span x-text="project.project_name"></span>
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap">
+                                    <span
+                                        class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium"
+                                        :class="{
+                                              'bg-green-100 text-green-700': project.status === 'active',
+                                              'bg-yellow-100 text-yellow-700': project.status === 'setup_incomplete' || project.status === 'paused',
+                                              'bg-gray-100 text-gray-700': project.status !== 'active' && project.status !== 'setup_incomplete' && project.status !== 'paused'
+                                          }">
+                                        <span class="w-1.5 h-1.5 rounded-full" :class="{
+                                                  'bg-green-500': project.status === 'active',
+                                                  'bg-yellow-500': project.status === 'setup_incomplete' || project.status === 'paused',
+                                                  'bg-gray-500': project.status !== 'active' && project.status !== 'setup_incomplete' && project.status !== 'paused'
+                                              }"></span>
+                                        <span x-text="formatStatus(project.status)"></span>
+                                    </span>
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                    <span x-text="formatDate(project.last_successful_run_at)"></span>
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                    <span x-text="calculateNextDue(project)"></span>
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-right text-sm">
+                                    <a :href="'/portal/project-detail.html?id=' + project.id"
+                                        class="text-blue-600 hover:text-blue-700 font-medium">
+                                        View →
+                                    </a>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+
+        </main>
+    </div>
+
+    <script>
+        function projectListApp() {
+            return {
+                loading: true,
+                error: '',
+                user: { display_name: '', company_id: '' },
+                projects: [],
+
+                async init() {
+                    try {
+                        // Get current user
+                        const meRes = await fetch('/auth/me', { credentials: 'same-origin' });
+                        if (!meRes.ok) {
+                            window.location.href = '/auth/login';
+                            return;
+                        }
+                        this.user = await meRes.json();
+
+                        // Get company_id from user's first company membership
+                        // TODO: handle multi-company users with company picker
+                        const companyId = this.user.company_id || this.extractCompanyFromMemberships();
+                        if (!companyId) {
+                            this.error = 'No company membership found. Please contact your administrator.';
+                            this.loading = false;
+                            return;
+                        }
+
+                        // Fetch projects
+                        const projectsRes = await fetch(`/auth/companies/${companyId}/projects`, {
+                            credentials: 'same-origin'
+                        });
+
+                        if (!projectsRes.ok) {
+                            throw new Error(`Failed to load projects: ${projectsRes.status}`);
+                        }
+
+                        const data = await projectsRes.json();
+                        this.projects = data.projects || [];
+                    } catch (err) {
+                        console.error('Error loading projects:', err);
+                        this.error = err.message || 'Failed to load projects';
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                extractCompanyFromMemberships() {
+                    // If user has companies array, pick first one
+                    // In a real multi-company scenario, would show company picker
+                    if (this.user.companies && this.user.companies.length > 0) {
+                        return this.user.companies[0].id;
+                    }
+                    return null;
+                },
+
+                formatStatus(status) {
+                    const statusMap = {
+                        'active': 'Active',
+                        'setup_incomplete': 'Setup Required',
+                        'paused': 'Paused',
+                        'archived': 'Archived'
+                    };
+                    return statusMap[status] || status;
+                },
+
+                formatDate(isoDate) {
+                    if (!isoDate) return '—';
+                    try {
+                        const date = new Date(isoDate);
+                        return date.toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric'
+                        });
+                    } catch {
+                        return '—';
+                    }
+                },
+
+                calculateNextDue(project) {
+                    // Placeholder for IR-4 scheduler integration
+                    // For now, just show "—" since auto-weekly isn't implemented yet
+                    if (project.status === 'active' && project.auto_weekly_enabled) {
+                        return 'Scheduled';
+                    }
+                    return '—';
+                },
+
+                async logout() {
+                    try {
+                        await fetch('/auth/logout', {
+                            method: 'POST',
+                            credentials: 'same-origin'
+                        });
+                    } finally {
+                        window.location.href = '/auth/login';
+                    }
+                }
+            };
+        }
+    </script>
+
+</body>
+
+</html>
