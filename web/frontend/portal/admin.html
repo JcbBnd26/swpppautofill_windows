@@ -19,6 +19,7 @@
                 <h1 class="text-lg font-semibold text-gray-800">Admin Panel</h1>
                 <div class="flex items-center gap-4 text-sm">
                     <a href="/" class="text-blue-600 hover:underline">Back to Portal</a>
+                    <a href="/portal/admin-health.html" class="text-indigo-600 hover:underline">Health Dashboard →</a>
                     <span class="text-gray-500" x-text="user.display_name"></span>
                 </div>
             </div>
@@ -73,51 +74,62 @@
                     The password is shown once; copy it before closing.
                 </p>
 
-            <!-- ── Section B0: New Company Signup (platform admin only) ── -->
-            <section x-show="user.is_platform_admin" class="bg-white rounded-xl shadow-sm border border-indigo-200 p-6">
-                <h2 class="text-lg font-semibold text-indigo-800 mb-1">Onboard New Company</h2>
-                <p class="text-xs text-gray-500 mb-4">Creates a 30-day signup link. The recipient fills their company profile and sets their own password.</p>
-                <div class="flex flex-wrap gap-4 items-end">
-                    <div class="flex-1 min-w-[200px]">
-                        <label class="block text-sm text-gray-600 mb-1">Proposed Company Name</label>
-                        <input type="text" x-model="companySignup.name" placeholder="e.g. Apex Contractors LLC"
-                            class="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+                <!-- ── Section B0: New Company Signup (platform admin only) ── -->
+                <section x-show="user.is_platform_admin"
+                    class="bg-white rounded-xl shadow-sm border border-indigo-200 p-6">
+                    <h2 class="text-lg font-semibold text-indigo-800 mb-1">Onboard New Company</h2>
+                    <p class="text-xs text-gray-500 mb-4">Creates a 30-day signup link. The recipient fills their
+                        company profile and sets their own password.</p>
+                    <div class="flex flex-wrap gap-4 items-end">
+                        <div class="flex-1 min-w-[200px]">
+                            <label class="block text-sm text-gray-600 mb-1">Proposed Company Name</label>
+                            <input type="text" x-model="companySignup.name" placeholder="e.g. Apex Contractors LLC"
+                                class="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+                        </div>
+                        <div class="flex-1 min-w-[200px]">
+                            <label class="block text-sm text-gray-600 mb-1">Admin Email (for reference)</label>
+                            <input type="email" x-model="companySignup.email" placeholder="admin@example.com"
+                                class="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+                        </div>
+                        <button @click="createCompanyInvite()"
+                            :disabled="!companySignup.name.trim() || !companySignup.email.trim()"
+                            class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg transition disabled:opacity-50">Generate
+                            Signup Link</button>
                     </div>
-                    <div class="flex-1 min-w-[200px]">
-                        <label class="block text-sm text-gray-600 mb-1">Admin Email (for reference)</label>
-                        <input type="email" x-model="companySignup.email" placeholder="admin@example.com"
-                            class="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+                    <div x-show="companySignupLink" class="mt-4 bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+                        <p class="text-sm text-indigo-800 mb-2">Signup link created — send this to the company admin:
+                        </p>
+                        <div class="flex items-center gap-3 flex-wrap">
+                            <code class="text-xs font-mono text-indigo-900 break-all" x-text="companySignupLink"></code>
+                            <button @click="copyText(companySignupLink)"
+                                class="text-xs bg-indigo-200 hover:bg-indigo-300 px-2 py-1 rounded flex-shrink-0">Copy</button>
+                        </div>
                     </div>
-                    <button @click="createCompanyInvite()"
-                        :disabled="!companySignup.name.trim() || !companySignup.email.trim()"
-                        class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg transition disabled:opacity-50">Generate Signup Link</button>
-                </div>
-                <div x-show="companySignupLink" class="mt-4 bg-indigo-50 border border-indigo-200 rounded-lg p-4">
-                    <p class="text-sm text-indigo-800 mb-2">Signup link created — send this to the company admin:</p>
-                    <div class="flex items-center gap-3 flex-wrap">
-                        <code class="text-xs font-mono text-indigo-900 break-all" x-text="companySignupLink"></code>
-                        <button @click="copyText(companySignupLink)"
-                            class="text-xs bg-indigo-200 hover:bg-indigo-300 px-2 py-1 rounded flex-shrink-0">Copy</button>
-                    </div>
-                </div>
-                <!-- Pending company signup invites -->
-                <div x-show="pendingCompanyInvites.length > 0" class="mt-6">
-                    <p class="text-sm font-medium text-gray-700 mb-2">Pending Company Signups</p>
-                    <table class="w-full text-xs">
-                        <thead><tr class="text-left text-gray-400 border-b"><th class="py-1">Company</th><th>Email</th><th>Created</th><th>Expires</th></tr></thead>
-                        <tbody>
-                            <template x-for="inv in pendingCompanyInvites" :key="inv.token">
-                                <tr class="border-b last:border-0">
-                                    <td class="py-1" x-text="inv.proposed_company_name"></td>
-                                    <td x-text="inv.admin_email"></td>
-                                    <td x-text="timeAgo(inv.created_at)"></td>
-                                    <td x-text="new Date(inv.expires_at).toLocaleDateString()"></td>
+                    <!-- Pending company signup invites -->
+                    <div x-show="pendingCompanyInvites.length > 0" class="mt-6">
+                        <p class="text-sm font-medium text-gray-700 mb-2">Pending Company Signups</p>
+                        <table class="w-full text-xs">
+                            <thead>
+                                <tr class="text-left text-gray-400 border-b">
+                                    <th class="py-1">Company</th>
+                                    <th>Email</th>
+                                    <th>Created</th>
+                                    <th>Expires</th>
                                 </tr>
-                            </template>
-                        </tbody>
-                    </table>
-                </div>
-            </section>
+                            </thead>
+                            <tbody>
+                                <template x-for="inv in pendingCompanyInvites" :key="inv.token">
+                                    <tr class="border-b last:border-0">
+                                        <td class="py-1" x-text="inv.proposed_company_name"></td>
+                                        <td x-text="inv.admin_email"></td>
+                                        <td x-text="timeAgo(inv.created_at)"></td>
+                                        <td x-text="new Date(inv.expires_at).toLocaleDateString()"></td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
                 <div class="flex flex-wrap gap-4 items-end">
                     <div class="flex-1 min-w-[200px]">
                         <label class="block text-sm text-gray-600 mb-1">Name</label>

@@ -1659,3 +1659,114 @@ def get_company_dashboard(conn: sqlite3.Connection, company_id: str) -> dict:
     ]
 
     return counts
+
+
+def get_platform_dashboard(conn: sqlite3.Connection) -> dict:
+    """Return cross-company health summary for the platform admin dashboard."""
+    # ── Metrics ────────────────────────────────────────────────────────────
+    metrics = conn.execute("""
+        SELECT
+            (SELECT COUNT(*) FROM companies WHERE is_active = 1) AS total_companies,
+            (SELECT COUNT(*) FROM projects WHERE status != 'archived') AS total_active_projects,
+            COALESCE((
+                SELECT SUM(reports_filed)
+                  FROM project_run_log
+                 WHERE date(created_at) >= date('now', '-7 days')
+            ), 0) AS reports_filed_7d,
+            COALESCE((
+                SELECT SUM(reports_filed)
+                  FROM project_run_log
+                 WHERE date(created_at) >= date('now', '-30 days')
+            ), 0) AS reports_filed_30d,
+            (SELECT MAX(created_at) FROM project_run_log) AS last_run_at
+        """).fetchone()
+
+    result: dict = {
+        "total_companies": metrics["total_companies"] or 0,
+        "total_active_projects": metrics["total_active_projects"] or 0,
+        "reports_filed_7d": metrics["reports_filed_7d"] or 0,
+        "reports_filed_30d": metrics["reports_filed_30d"] or 0,
+        "last_run_at": metrics["last_run_at"],
+    }
+
+    # ── Problem projects (red = failing, yellow = setup_incomplete or stale) ──
+    problem_rows = conn.execute("""
+        SELECT
+            c.display_name AS company_name,
+            p.id AS project_id,
+            p.project_number,
+            p.project_name,
+            p.last_successful_run_at,
+            p.status,
+            p.auto_weekly_enabled,
+            p.last_run_status,
+            COALESCE((
+                SELECT SUM(rl.reports_filed)
+                  FROM project_run_log rl
+                 WHERE rl.project_id = p.id
+                   AND rl.status IN ('failed', 'partial_failure')
+                   AND date(rl.created_at) >= date('now', '-7 days')
+            ), 0) AS failure_count_7d,
+            CASE
+                WHEN p.auto_weekly_enabled = 1
+                     AND p.last_run_status IN ('failed', 'partial_failure')
+                THEN 'red'
+                ELSE 'yellow'
+            END AS health_flag
+          FROM projects p
+          JOIN companies c ON c.id = p.company_id
+         WHERE p.status != 'archived'
+           AND (
+               -- red: auto-weekly failing
+               (p.auto_weekly_enabled = 1
+                AND p.last_run_status IN ('failed', 'partial_failure'))
+               OR
+               -- yellow: setup incomplete
+               p.status = 'setup_incomplete'
+               OR
+               -- yellow: active+auto but stale >8 days
+               (p.auto_weekly_enabled = 1
+                AND p.status = 'active'
+                AND (p.last_successful_run_at IS NULL
+                     OR julianday('now') - julianday(p.last_successful_run_at) > 8))
+           )
+         ORDER BY
+             CASE WHEN p.auto_weekly_enabled = 1
+                       AND p.last_run_status IN ('failed', 'partial_failure')
+                  THEN 0 ELSE 1 END,
+             c.display_name COLLATE NOCASE
+        """).fetchall()
+
+    result["problem_projects"] = [dict(r) for r in problem_rows]
+
+    # ── Company rollup ─────────────────────────────────────────────────────
+    rollup_rows = conn.execute("""
+        SELECT
+            c.id,
+            c.display_name,
+            COUNT(p.id) AS total_projects,
+            SUM(CASE WHEN p.status = 'active' THEN 1 ELSE 0 END) AS active,
+            SUM(CASE WHEN p.auto_weekly_enabled = 1
+                          AND p.last_run_status IN ('failed', 'partial_failure')
+                     THEN 1 ELSE 0 END) AS failing,
+            SUM(CASE WHEN p.status = 'paused' THEN 1 ELSE 0 END) AS paused,
+            SUM(CASE WHEN p.status = 'setup_incomplete' THEN 1 ELSE 0 END) AS setup_incomplete,
+            MAX(p.last_run_at) AS last_activity,
+            (SELECT u.display_name
+               FROM company_users cu
+               JOIN users u ON u.id = cu.user_id
+              WHERE cu.company_id = c.id
+                AND cu.role = 'company_admin'
+              ORDER BY cu.joined_at ASC
+              LIMIT 1) AS admin_name
+          FROM companies c
+          LEFT JOIN projects p
+            ON p.company_id = c.id AND p.status != 'archived'
+         WHERE c.is_active = 1
+         GROUP BY c.id, c.display_name
+         ORDER BY failing DESC, c.display_name COLLATE NOCASE
+        """).fetchall()
+
+    result["company_rollup"] = [dict(r) for r in rollup_rows]
+
+    return result

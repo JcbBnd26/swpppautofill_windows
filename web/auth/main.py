@@ -75,6 +75,9 @@ from web.auth.models import (
     ProjectFailureSummary,
     RunLogEntry,
     RunLogResponse,
+    PlatformDashboardResponse,
+    ProblemProjectRow,
+    CompanyHealthRow,
 )
 from web.log_config import configure_logging
 
@@ -1929,6 +1932,65 @@ def list_companies(
             )
             for c in companies
         ]
+    )
+
+
+# ── Platform Admin: Health Dashboard ─────────────────────────────────────
+
+
+@app.get("/admin/platform-health", response_model=PlatformDashboardResponse)
+def get_platform_health(
+    _admin: dict[str, Any] = Depends(require_platform_admin),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    """Return cross-company health summary (platform admin only)."""
+    data = db.get_platform_dashboard(conn)
+
+    problem_projects = [
+        ProblemProjectRow(
+            company_name=p["company_name"],
+            project_id=p["project_id"],
+            project_number=p["project_number"],
+            project_name=p["project_name"],
+            health_flag=p["health_flag"],
+            status_reason=(
+                "Failing (auto-weekly)"
+                if p["health_flag"] == "red"
+                else (
+                    "Setup incomplete"
+                    if p["status"] == "setup_incomplete"
+                    else "Stale (>8 days)"
+                )
+            ),
+            last_successful_run_at=p["last_successful_run_at"],
+            failure_count_7d=p["failure_count_7d"],
+        )
+        for p in data["problem_projects"]
+    ]
+
+    company_rollup = [
+        CompanyHealthRow(
+            id=c["id"],
+            display_name=c["display_name"],
+            total_projects=c["total_projects"] or 0,
+            active=c["active"] or 0,
+            failing=c["failing"] or 0,
+            paused=c["paused"] or 0,
+            setup_incomplete=c["setup_incomplete"] or 0,
+            last_activity=c["last_activity"],
+            admin_name=c["admin_name"],
+        )
+        for c in data["company_rollup"]
+    ]
+
+    return PlatformDashboardResponse(
+        total_companies=data["total_companies"],
+        total_active_projects=data["total_active_projects"],
+        reports_filed_7d=data["reports_filed_7d"],
+        reports_filed_30d=data["reports_filed_30d"],
+        last_run_at=data["last_run_at"],
+        problem_projects=problem_projects,
+        company_rollup=company_rollup,
     )
 
 

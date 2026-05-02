@@ -490,3 +490,36 @@ class RunLogEntry(BaseModel):
 
 class RunLogResponse(BaseModel):
     entries: list[RunLogEntry]
+
+
+class ProblemProjectRow(BaseModel):
+    company_name: str
+    project_id: str
+    project_number: str
+    project_name: str
+    health_flag: str  # 'red' or 'yellow'
+    status_reason: str
+    last_successful_run_at: str | None = None
+    failure_count_7d: int
+
+
+class CompanyHealthRow(BaseModel):
+    id: str
+    display_name: str
+    total_projects: int
+    active: int
+    failing: int
+    paused: int
+    setup_incomplete: int
+    last_activity: str | None = None
+    admin_name: str | None = None
+
+
+class PlatformDashboardResponse(BaseModel):
+    total_companies: int
+    total_active_projects: int
+    reports_filed_7d: int
+    reports_filed_30d: int
+    last_run_at: str | None = None
+    problem_projects: list[ProblemProjectRow]
+    company_rollup: list[CompanyHealthRow]
