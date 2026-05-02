@@ -30,7 +30,7 @@ SAFE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 SESSION_LIFETIME_DAYS = 90
 
 # Valid company-user roles.
-COMPANY_ROLES = frozenset({"company_admin", "pm", "viewer"})
+COMPANY_ROLES = frozenset({"company_admin", "pm"})
 
 SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS apps (
@@ -119,6 +119,50 @@ CREATE TABLE IF NOT EXISTS company_signup_invites (
     claimed_at                    TEXT,
     claimed_by_user_id            TEXT REFERENCES users(id),
     created_by_platform_admin_id  TEXT REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS projects (
+    id                          TEXT PRIMARY KEY,
+    company_id                  TEXT NOT NULL REFERENCES companies(id),
+    project_number              TEXT NOT NULL,
+    project_name                TEXT NOT NULL,
+    site_address                TEXT NOT NULL,
+    timezone                    TEXT NOT NULL DEFAULT 'America/Chicago',
+    rain_station_code           TEXT NOT NULL,
+    project_start_date          TEXT,
+    project_end_date            TEXT,
+    re_odot_contact_1           TEXT,
+    re_odot_contact_2           TEXT,
+    contractor_name             TEXT,
+    contract_id                 TEXT,
+    notes                       TEXT,
+    auto_weekly_enabled         INTEGER NOT NULL DEFAULT 0,
+    schedule_day_of_week        INTEGER NOT NULL DEFAULT 5,
+    rain_threshold_inches       REAL NOT NULL DEFAULT 0.5,
+    notify_on_success           INTEGER NOT NULL DEFAULT 0,
+    notify_on_failure           INTEGER NOT NULL DEFAULT 1,
+    notification_emails         TEXT,
+    template_review_cadence     TEXT NOT NULL DEFAULT 'quarterly',
+    auto_pause_on_missed_review INTEGER NOT NULL DEFAULT 0,
+    template_promote_mode       TEXT NOT NULL DEFAULT 'auto',
+    status                      TEXT NOT NULL DEFAULT 'setup_incomplete',
+    active_template_version_id  TEXT,
+    paused_until                TEXT,
+    last_successful_run_at      TEXT,
+    last_run_status             TEXT,
+    last_run_at                 TEXT,
+    template_last_reviewed_at   TEXT,
+    last_preview_generated_at   TEXT,
+    archive_zip_path            TEXT,
+    archived_at                 TEXT,
+    archived_by_user_id         TEXT REFERENCES users(id),
+    not_document_path           TEXT,
+    not_uploaded_at             TEXT,
+    not_uploaded_by             TEXT REFERENCES users(id),
+    cloud_sync_status           TEXT,
+    created_at                  TEXT NOT NULL,
+    created_by_user_id          TEXT NOT NULL REFERENCES users(id),
+    UNIQUE(company_id, project_number)
 );
 """
 
@@ -829,7 +873,9 @@ def create_employee_invite(
 ) -> str:
     """Create an invite code that also adds the claimed user to a company with a role."""
     if role not in COMPANY_ROLES:
-        raise ValueError(f"Invalid role '{role}'. Must be one of {sorted(COMPANY_ROLES)}")
+        raise ValueError(
+            f"Invalid role '{role}'. Must be one of {sorted(COMPANY_ROLES)}"
+        )
     code = generate_invite_code()
     while conn.execute("SELECT 1 FROM invite_codes WHERE id = ?", (code,)).fetchone():
         code = generate_invite_code()
@@ -863,11 +909,20 @@ def create_company_signup_invite(
         "(token, proposed_company_name, admin_email, created_at, expires_at, "
         "created_by_platform_admin_id) "
         "VALUES (?, ?, ?, ?, ?, ?)",
-        (token, proposed_company_name, admin_email, now_dt.isoformat(), expires_at, created_by),
+        (
+            token,
+            proposed_company_name,
+            admin_email,
+            now_dt.isoformat(),
+            expires_at,
+            created_by,
+        ),
     )
     log.info(
         "Company signup invite created: proposed=%s email=%s by=%s",
-        proposed_company_name, admin_email, created_by,
+        proposed_company_name,
+        admin_email,
+        created_by,
     )
     return token
 
@@ -946,7 +1001,165 @@ def claim_company_signup_invite(
 
     log.info(
         "Company signup claimed: company_id=%s user_id=%s",
-        company_id, user_id,
+        company_id,
+        user_id,
     )
     session_token = create_session(conn, user_id, device_label)
     return user_id, company_id, session_token
+
+
+# ── Projects ───────────────────────────────────────────────────────────────
+
+
+def create_project(
+    conn: sqlite3.Connection,
+    company_id: str,
+    created_by_user_id: str,
+    **fields: Any,
+) -> str:
+    """Create a new project. Returns project id."""
+    project_id = str(uuid.uuid4())
+    required = {
+        "project_number",
+        "project_name",
+        "site_address",
+        "rain_station_code",
+    }
+    for r in required:
+        if r not in fields:
+            raise ValueError(f"Missing required field: {r}")
+
+    # Allowed optional fields with their defaults already in schema
+    allowed_optional = {
+        "timezone",
+        "project_start_date",
+        "project_end_date",
+        "re_odot_contact_1",
+        "re_odot_contact_2",
+        "contractor_name",
+        "contract_id",
+        "notes",
+    }
+
+    all_fields = {**fields}
+    all_fields["id"] = project_id
+    all_fields["company_id"] = company_id
+    all_fields["created_by_user_id"] = created_by_user_id
+    all_fields["created_at"] = _now()
+
+    columns = list(all_fields.keys())
+    placeholders = ", ".join("?" * len(columns))
+    col_names = ", ".join(columns)
+    values = [all_fields[c] for c in columns]
+
+    try:
+        conn.execute(
+            f"INSERT INTO projects ({col_names}) VALUES ({placeholders})",
+            values,
+        )
+    except sqlite3.IntegrityError as e:
+        if "UNIQUE constraint failed" in str(e):
+            raise ValueError("Project number already exists in this company") from e
+        raise
+
+    log.info(
+        "Project created: id=%s company_id=%s number=%s",
+        project_id,
+        company_id,
+        fields["project_number"],
+    )
+    return project_id
+
+
+def get_project(conn: sqlite3.Connection, project_id: str) -> dict[str, Any] | None:
+    """Get a project by id (no company filter)."""
+    row = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def get_project_by_number(
+    conn: sqlite3.Connection, project_number: str
+) -> dict[str, Any] | None:
+    """Get a project by project number (for Mailbox lookup — no company filter)."""
+    row = conn.execute(
+        "SELECT * FROM projects WHERE project_number = ?",
+        (project_number,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def get_company_projects(
+    conn: sqlite3.Connection, company_id: str
+) -> list[dict[str, Any]]:
+    """Get all projects for a company, ordered by created_at DESC."""
+    rows = conn.execute(
+        "SELECT * FROM projects WHERE company_id = ? ORDER BY created_at DESC",
+        (company_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_project_for_company(
+    conn: sqlite3.Connection,
+    project_id: str,
+    company_id: str,
+) -> dict[str, Any] | None:
+    """Tenant-safe lookup — returns project only if it belongs to company."""
+    row = conn.execute(
+        "SELECT * FROM projects WHERE id = ? AND company_id = ?",
+        (project_id, company_id),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def update_project(conn: sqlite3.Connection, project_id: str, **fields: Any) -> None:
+    """Update a project with allowed fields."""
+    allowed = {
+        "project_name",
+        "site_address",
+        "timezone",
+        "rain_station_code",
+        "project_start_date",
+        "project_end_date",
+        "re_odot_contact_1",
+        "re_odot_contact_2",
+        "contractor_name",
+        "contract_id",
+        "notes",
+        "auto_weekly_enabled",
+        "schedule_day_of_week",
+        "rain_threshold_inches",
+        "notify_on_success",
+        "notify_on_failure",
+        "notification_emails",
+        "template_review_cadence",
+        "auto_pause_on_missed_review",
+        "template_promote_mode",
+        "status",
+        "active_template_version_id",
+        "paused_until",
+        "last_successful_run_at",
+        "last_run_status",
+        "last_run_at",
+        "template_last_reviewed_at",
+        "last_preview_generated_at",
+        "archive_zip_path",
+        "archived_at",
+        "archived_by_user_id",
+        "not_document_path",
+        "not_uploaded_at",
+        "not_uploaded_by",
+        "cloud_sync_status",
+    }
+    updates = {k: v for k, v in fields.items() if k in allowed}
+    if not updates:
+        return
+
+    # Convert bools to ints for SQLite
+    for k in list(updates):
+        if isinstance(updates[k], bool):
+            updates[k] = int(updates[k])
+
+    set_clause = ", ".join(f"{k} = ?" for k in updates)
+    values = list(updates.values()) + [project_id]
+    conn.execute(f"UPDATE projects SET {set_clause} WHERE id = ?", values)

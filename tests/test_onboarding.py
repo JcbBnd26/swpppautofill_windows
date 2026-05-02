@@ -170,8 +170,12 @@ class TestCompanySignupInvite:
             token = db.create_company_signup_invite(conn, _co(), _email(), pa)
         with db.connect() as conn:
             db.claim_company_signup_invite(
-                conn, token=token, display_name=_u(), password="P@ssword1",
-                legal_name=_co(), company_display_name=_co(),
+                conn,
+                token=token,
+                display_name=_u(),
+                password="P@ssword1",
+                legal_name=_co(),
+                company_display_name=_co(),
             )
             invite = db.get_company_signup_invite(conn, token)
         assert invite["claimed_at"] is not None
@@ -183,8 +187,10 @@ class TestCompanySignupInvite:
             pa = db.create_user(conn, _u("PA5"), is_admin=True)
             token = db.create_company_signup_invite(conn, _co(), _email(), pa)
         args = dict(
-            display_name=_u(), password="P@ssword1",
-            legal_name=_co(), company_display_name=_co(),
+            display_name=_u(),
+            password="P@ssword1",
+            legal_name=_co(),
+            company_display_name=_co(),
         )
         with db.connect() as conn:
             first = db.claim_company_signup_invite(conn, token=token, **args)
@@ -205,8 +211,12 @@ class TestCompanySignupInvite:
             )
         with db.connect() as conn:
             result = db.claim_company_signup_invite(
-                conn, token=token, display_name=_u(), password="P@ssword1",
-                legal_name=_co(), company_display_name=_co(),
+                conn,
+                token=token,
+                display_name=_u(),
+                password="P@ssword1",
+                legal_name=_co(),
+                company_display_name=_co(),
             )
         assert result is None
 
@@ -239,7 +249,7 @@ class TestEmployeeInvite:
     def test_claim_employee_invite_adds_to_company(self):
         cid = self._setup()
         with db.connect() as conn:
-            code = db.create_employee_invite(conn, _u("Emp"), cid, "viewer", ["swppp"])
+            code = db.create_employee_invite(conn, _u("Emp"), cid, "pm", ["swppp"])
         with db.connect() as conn:
             result = db.claim_invite_code(conn, code)
         assert result is not None
@@ -247,7 +257,7 @@ class TestEmployeeInvite:
         with db.connect() as conn:
             membership = db.get_company_user(conn, user_id, cid)
         assert membership is not None
-        assert membership["role"] == "viewer"
+        assert membership["role"] == "pm"
 
     def test_invalid_role_on_employee_invite_raises(self):
         cid = self._setup()
@@ -255,12 +265,14 @@ class TestEmployeeInvite:
             with pytest.raises(ValueError, match="Invalid role"):
                 db.create_employee_invite(conn, _u(), cid, "god", ["swppp"])
 
-    def test_all_three_roles_produce_correct_membership(self):
+    def test_both_roles_produce_correct_membership(self):
         db.init_db()
-        for role in ("company_admin", "pm", "viewer"):
+        for role in ("company_admin", "pm"):
             cid = self._setup()
             with db.connect() as conn:
-                code = db.create_employee_invite(conn, _u(f"R{role}"), cid, role, ["swppp"])
+                code = db.create_employee_invite(
+                    conn, _u(f"R{role}"), cid, role, ["swppp"]
+                )
             with db.connect() as conn:
                 uid, _ = db.claim_invite_code(conn, code)
                 m = db.get_company_user(conn, uid, cid)
@@ -273,10 +285,13 @@ class TestEmployeeInvite:
 class TestSignupInviteEndpoints:
     def test_platform_admin_can_create_signup_invite(self):
         client, _ = _admin_client()
-        res = client.post("/admin/company-signup-invites", json={
-            "proposed_company_name": _co(),
-            "admin_email": _email(),
-        })
+        res = client.post(
+            "/admin/company-signup-invites",
+            json={
+                "proposed_company_name": _co(),
+                "admin_email": _email(),
+            },
+        )
         assert res.status_code == 200
         data = res.json()
         assert "token" in data
@@ -290,36 +305,48 @@ class TestSignupInviteEndpoints:
             token = db.create_session(conn, uid)
         client = TestClient(app, raise_server_exceptions=True)
         client.cookies.set("tools_session", token)
-        res = client.post("/admin/company-signup-invites", json={
-            "proposed_company_name": _co(),
-            "admin_email": _email(),
-        })
+        res = client.post(
+            "/admin/company-signup-invites",
+            json={
+                "proposed_company_name": _co(),
+                "admin_email": _email(),
+            },
+        )
         assert res.status_code == 403
 
     def test_unauthenticated_gets_401(self):
         client = TestClient(app, raise_server_exceptions=True)
-        res = client.post("/admin/company-signup-invites", json={
-            "proposed_company_name": _co(),
-            "admin_email": _email(),
-        })
+        res = client.post(
+            "/admin/company-signup-invites",
+            json={
+                "proposed_company_name": _co(),
+                "admin_email": _email(),
+            },
+        )
         assert res.status_code == 401
 
     def test_list_signup_invites(self):
         client, admin_id = _admin_client()
-        client.post("/admin/company-signup-invites", json={
-            "proposed_company_name": _co("Listed"),
-            "admin_email": _email(),
-        })
+        client.post(
+            "/admin/company-signup-invites",
+            json={
+                "proposed_company_name": _co("Listed"),
+                "admin_email": _email(),
+            },
+        )
         res = client.get("/admin/company-signup-invites")
         assert res.status_code == 200
         assert "invites" in res.json()
 
     def test_get_invite_info_valid(self):
         client, _ = _admin_client()
-        create_res = client.post("/admin/company-signup-invites", json={
-            "proposed_company_name": "Test Corp",
-            "admin_email": _email(),
-        })
+        create_res = client.post(
+            "/admin/company-signup-invites",
+            json={
+                "proposed_company_name": "Test Corp",
+                "admin_email": _email(),
+            },
+        )
         token = create_res.json()["token"]
         info_res = TestClient(app).get(f"/auth/signup-invite/{token}")
         assert info_res.status_code == 200
@@ -331,21 +358,27 @@ class TestSignupInviteEndpoints:
 
     def test_full_signup_flow(self):
         client, _ = _admin_client()
-        create_res = client.post("/admin/company-signup-invites", json={
-            "proposed_company_name": _co("Full"),
-            "admin_email": _email(),
-        })
+        create_res = client.post(
+            "/admin/company-signup-invites",
+            json={
+                "proposed_company_name": _co("Full"),
+                "admin_email": _email(),
+            },
+        )
         token = create_res.json()["token"]
         signup_client = TestClient(app, raise_server_exceptions=True)
         name = _co("Claimed")
-        res = signup_client.post("/auth/signup", json={
-            "token": token,
-            "display_name": _u("NewAdmin"),
-            "password": "NewPass1!",
-            "legal_name": name,
-            "company_display_name": name,
-            "timezone": "America/Chicago",
-        })
+        res = signup_client.post(
+            "/auth/signup",
+            json={
+                "token": token,
+                "display_name": _u("NewAdmin"),
+                "password": "NewPass1!",
+                "legal_name": name,
+                "company_display_name": name,
+                "timezone": "America/Chicago",
+            },
+        )
         assert res.status_code == 200
         data = res.json()
         assert data["success"] is True
@@ -353,14 +386,17 @@ class TestSignupInviteEndpoints:
 
     def test_signup_with_bad_token_returns_400(self):
         signup_client = TestClient(app, raise_server_exceptions=True)
-        res = signup_client.post("/auth/signup", json={
-            "token": "bogus-token",
-            "display_name": _u(),
-            "password": "NewPass1!",
-            "legal_name": _co(),
-            "company_display_name": _co(),
-            "timezone": "America/Chicago",
-        })
+        res = signup_client.post(
+            "/auth/signup",
+            json={
+                "token": "bogus-token",
+                "display_name": _u(),
+                "password": "NewPass1!",
+                "legal_name": _co(),
+                "company_display_name": _co(),
+                "timezone": "America/Chicago",
+            },
+        )
         assert res.status_code == 400
 
 
@@ -402,11 +438,14 @@ class TestCompanyMemberEndpoints:
     def test_company_admin_can_create_employee_invite(self):
         cid = self._setup_company()
         client, _ = _company_admin_client(cid)
-        res = client.post(f"/companies/{cid}/invites", json={
-            "display_name": _u("NewEmp"),
-            "role": "pm",
-            "app_permissions": ["swppp"],
-        })
+        res = client.post(
+            f"/companies/{cid}/invites",
+            json={
+                "display_name": _u("NewEmp"),
+                "role": "pm",
+                "app_permissions": ["swppp"],
+            },
+        )
         assert res.status_code == 200
         data = res.json()
         assert "code" in data
@@ -422,38 +461,27 @@ class TestCompanyMemberEndpoints:
             token = db.create_session(conn, uid)
         client = TestClient(app, raise_server_exceptions=True)
         client.cookies.set("tools_session", token)
-        res = client.post(f"/companies/{cid}/invites", json={
-            "display_name": _u("Attempt"),
-            "role": "viewer",
-            "app_permissions": ["swppp"],
-        })
-        assert res.status_code == 403
-
-    def test_viewer_cannot_create_employee_invite(self):
-        cid = self._setup_company()
-        db.init_db()
-        with db.connect() as conn:
-            uid = db.create_user(conn, _u("ViewerUser"))
-            db.grant_app_access(conn, uid, "swppp")
-            db.add_company_user(conn, uid, cid, role="viewer")
-            token = db.create_session(conn, uid)
-        client = TestClient(app, raise_server_exceptions=True)
-        client.cookies.set("tools_session", token)
-        res = client.post(f"/companies/{cid}/invites", json={
-            "display_name": _u("AttemptViewer"),
-            "role": "pm",
-            "app_permissions": ["swppp"],
-        })
+        res = client.post(
+            f"/companies/{cid}/invites",
+            json={
+                "display_name": _u("Attempt"),
+                "role": "pm",
+                "app_permissions": ["swppp"],
+            },
+        )
         assert res.status_code == 403
 
     def test_invalid_role_in_employee_invite_returns_400(self):
         cid = self._setup_company()
         client, _ = _company_admin_client(cid)
-        res = client.post(f"/companies/{cid}/invites", json={
-            "display_name": _u("BadRole"),
-            "role": "superadmin",
-            "app_permissions": ["swppp"],
-        })
+        res = client.post(
+            f"/companies/{cid}/invites",
+            json={
+                "display_name": _u("BadRole"),
+                "role": "superadmin",
+                "app_permissions": ["swppp"],
+            },
+        )
         assert res.status_code == 400
 
     def test_update_member_role(self):
@@ -463,11 +491,13 @@ class TestCompanyMemberEndpoints:
             target_uid = db.create_user(conn, _u("Target"))
             db.add_company_user(conn, target_uid, cid, role="pm")
         client, _ = _company_admin_client(cid)
-        res = client.patch(f"/companies/{cid}/members/{target_uid}", json={"role": "viewer"})
+        res = client.patch(
+            f"/companies/{cid}/members/{target_uid}", json={"role": "company_admin"}
+        )
         assert res.status_code == 200
         with db.connect() as conn:
             m = db.get_company_user(conn, target_uid, cid)
-        assert m["role"] == "viewer"
+        assert m["role"] == "company_admin"
 
     def test_remove_member(self):
         cid = self._setup_company()
@@ -494,8 +524,12 @@ class TestAdminCompanyList:
         db.init_db()
         with db.connect() as conn:
             db.seed_app(conn, "swppp", "SWPPP", "desc", "/swppp")
-            cid1 = db.create_company(conn, legal_name=_co(), display_name=_co(), timezone="America/Chicago")
-            cid2 = db.create_company(conn, legal_name=_co(), display_name=_co(), timezone="America/Chicago")
+            cid1 = db.create_company(
+                conn, legal_name=_co(), display_name=_co(), timezone="America/Chicago"
+            )
+            cid2 = db.create_company(
+                conn, legal_name=_co(), display_name=_co(), timezone="America/Chicago"
+            )
         client, _ = _admin_client()
         res = client.get("/admin/companies")
         assert res.status_code == 200

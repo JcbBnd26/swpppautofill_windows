@@ -184,10 +184,10 @@ class TestCompanyMembership:
         assert member["role"] == "pm"
         assert member["is_active"] == 1
 
-    def test_all_three_valid_roles_accepted(self):
+    def test_both_valid_roles_accepted(self):
         db.init_db()
         with db.connect() as conn:
-            for role in ("company_admin", "pm", "viewer"):
+            for role in ("company_admin", "pm"):
                 cid = db.create_company(
                     conn,
                     legal_name=_co(),
@@ -251,7 +251,7 @@ class TestCompanyMembership:
             )
             uid = db.create_user(conn, _u())
             db.add_company_user(conn, uid, cid_a, role="pm")
-            db.add_company_user(conn, uid, cid_b, role="viewer")
+            db.add_company_user(conn, uid, cid_b, role="company_admin")
             memberships = db.get_user_companies(conn, uid)
         company_ids = {m["id"] for m in memberships}
         assert cid_a in company_ids

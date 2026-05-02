@@ -14,7 +14,11 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from web.auth import db
-from web.auth.dependencies import get_current_user, require_admin, require_platform_admin
+from web.auth.dependencies import (
+    get_current_user,
+    require_admin,
+    require_platform_admin,
+)
 from web.auth.models import (
     AppCreateRequest,
     AppFullInfo,
@@ -46,6 +50,11 @@ from web.auth.models import (
     MeResponse,
     PatchAppRequest,
     PatchUserRequest,
+    ProjectCreateRequest,
+    ProjectDetailResponse,
+    ProjectInfo,
+    ProjectListResponse,
+    ProjectUpdateRequest,
     ResetPasswordResponse,
     SessionInfo,
     SessionListResponse,
@@ -740,7 +749,9 @@ def create_company_signup_invite(
     link = f"{BASE_URL.rstrip('/')}/signup/{token}"
     log.info(
         "Company signup invite created: proposed=%s email=%s by=%s",
-        name, email, admin["id"],
+        name,
+        email,
+        admin["id"],
     )
     return CompanySignupInviteResponse(token=token, link=link)
 
@@ -868,12 +879,20 @@ def create_employee_invite(
         "SELECT 1 FROM users WHERE display_name = ? COLLATE NOCASE LIMIT 1", (name,)
     ).fetchone()
     if existing:
-        raise HTTPException(status_code=400, detail=f"A user named '{name}' already exists")
-    code = db.create_employee_invite(conn, name, company_id, body.role, body.app_permissions)
+        raise HTTPException(
+            status_code=400, detail=f"A user named '{name}' already exists"
+        )
+    code = db.create_employee_invite(
+        conn, name, company_id, body.role, body.app_permissions
+    )
     link = f"{BASE_URL.rstrip('/')}/auth/login?code={code}"
     log.info(
         "Employee invite created: code=%s name=%s role=%s company=%s by=%s",
-        code, name, body.role, company_id, user["id"],
+        code,
+        name,
+        body.role,
+        company_id,
+        user["id"],
     )
     return EmployeeInviteResponse(code=code, link=link)
 
@@ -936,7 +955,10 @@ def update_member_role(
     )
     log.info(
         "Member role updated: user=%s company=%s role=%s by=%s",
-        user_id, company_id, new_role, admin_user["id"],
+        user_id,
+        company_id,
+        new_role,
+        admin_user["id"],
     )
     return SuccessResponse()
 
@@ -963,8 +985,165 @@ def remove_company_member(
     )
     log.info(
         "Member removed: user=%s company=%s by=%s",
-        user_id, company_id, admin_user["id"],
+        user_id,
+        company_id,
+        admin_user["id"],
     )
+    return SuccessResponse()
+
+
+# ── Projects (IR-1) ──────────────────────────────────────────────────────
+
+
+@app.post("/companies/{company_id}/projects")
+def create_project(
+    company_id: str,
+    body: ProjectCreateRequest,
+    user: dict[str, Any] = Depends(get_current_user),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    """Create a new project. Requires company membership (any role)."""
+    # Verify company membership (or platform admin).
+    if not user.get("is_platform_admin"):
+        membership = db.get_company_user(conn, user["id"], company_id)
+        if not membership:
+            raise HTTPException(status_code=403, detail="Not a member of this company")
+        # Only company_admin and pm can create projects.
+        if membership["role"] not in ("company_admin", "pm"):
+            raise HTTPException(
+                status_code=403,
+                detail="Project creation requires company_admin or pm role",
+            )
+
+    # Verify company exists.
+    company = db.get_company(conn, company_id)
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    # Create the project.
+    try:
+        project_data = body.model_dump(exclude_none=True)
+        project_id = db.create_project(
+            conn,
+            company_id=company_id,
+            created_by_user_id=user["id"],
+            **project_data,
+        )
+    except ValueError as e:
+        if "already exists" in str(e):
+            raise HTTPException(status_code=409, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
+
+    log.info(
+        "Project created: id=%s number=%s company=%s by=%s",
+        project_id,
+        body.project_number,
+        company_id,
+        user["id"],
+    )
+    return {"id": project_id}
+
+
+@app.get("/companies/{company_id}/projects")
+def list_company_projects(
+    company_id: str,
+    user: dict[str, Any] = Depends(get_current_user),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    """List all projects for a company. Requires company membership."""
+    # Verify company membership (or platform admin).
+    if not user.get("is_platform_admin"):
+        membership = db.get_company_user(conn, user["id"], company_id)
+        if not membership:
+            raise HTTPException(status_code=403, detail="Not a member of this company")
+
+    # Verify company exists.
+    company = db.get_company(conn, company_id)
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    projects = db.get_company_projects(conn, company_id)
+    return ProjectListResponse(
+        projects=[
+            ProjectInfo(
+                id=p["id"],
+                company_id=p["company_id"],
+                project_number=p["project_number"],
+                project_name=p["project_name"],
+                site_address=p["site_address"],
+                timezone=p["timezone"],
+                rain_station_code=p["rain_station_code"],
+                status=p["status"],
+                auto_weekly_enabled=bool(p["auto_weekly_enabled"]),
+                last_successful_run_at=p["last_successful_run_at"],
+                last_run_status=p["last_run_status"],
+                created_at=p["created_at"],
+            )
+            for p in projects
+        ]
+    )
+
+
+@app.get("/companies/{company_id}/projects/{project_id}")
+def get_project_detail(
+    company_id: str,
+    project_id: str,
+    user: dict[str, Any] = Depends(get_current_user),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    """Get project detail. Requires company membership."""
+    # Verify company membership (or platform admin).
+    if not user.get("is_platform_admin"):
+        membership = db.get_company_user(conn, user["id"], company_id)
+        if not membership:
+            raise HTTPException(status_code=403, detail="Not a member of this company")
+
+    # Get project with tenant isolation.
+    project = db.get_project_for_company(conn, project_id, company_id)
+    if not project:
+        # Return 404 whether project doesn't exist or belongs to another company (tenant isolation).
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    return ProjectDetailResponse(**project)
+
+
+@app.patch("/companies/{company_id}/projects/{project_id}")
+def update_project_settings(
+    company_id: str,
+    project_id: str,
+    body: ProjectUpdateRequest,
+    user: dict[str, Any] = Depends(get_current_user),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    """Update project settings. Requires company_admin or pm role."""
+    # Verify company membership (or platform admin).
+    if not user.get("is_platform_admin"):
+        membership = db.get_company_user(conn, user["id"], company_id)
+        if not membership:
+            raise HTTPException(status_code=403, detail="Not a member of this company")
+        # Only company_admin and pm can update projects.
+        if membership["role"] not in ("company_admin", "pm"):
+            raise HTTPException(
+                status_code=403,
+                detail="Project update requires company_admin or pm role",
+            )
+
+    # Verify project exists and belongs to company (tenant isolation).
+    project = db.get_project_for_company(conn, project_id, company_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Update project with provided fields.
+    update_data = body.model_dump(exclude_none=True)
+    if update_data:
+        db.update_project(conn, project_id, **update_data)
+        log.info(
+            "Project updated: id=%s fields=%s by=%s",
+            project_id,
+            list(update_data.keys()),
+            user["id"],
+        )
+
     return SuccessResponse()
 
 
