@@ -195,6 +195,21 @@ CREATE TABLE IF NOT EXISTS mailbox_entries (
 
 CREATE INDEX IF NOT EXISTS idx_mailbox_project
     ON mailbox_entries(project_id, report_date DESC);
+
+CREATE TABLE IF NOT EXISTS project_run_log (
+    id              TEXT PRIMARY KEY,
+    project_id      TEXT NOT NULL REFERENCES projects(id),
+    run_date        TEXT NOT NULL,
+    status          TEXT NOT NULL,
+    error_type      TEXT,
+    error_message   TEXT,
+    reports_filed   INTEGER NOT NULL DEFAULT 0,
+    duration_ms     INTEGER,
+    created_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_run_log_project
+    ON project_run_log(project_id, run_date DESC);
 """
 
 
@@ -1483,3 +1498,164 @@ def get_mailbox_entry_count(conn: sqlite3.Connection, project_id: str) -> int:
         (project_id,),
     ).fetchone()
     return row["count"] if row else 0
+
+
+# ── Scheduler / Project Run Log ──────────────────────────────────────────
+
+
+def get_projects_due_for_run(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Return all active projects with auto_weekly_enabled=1 that are not expired and not paused."""
+    today = _now()[:10]  # YYYY-MM-DD
+    rows = conn.execute(
+        """
+        SELECT * FROM projects
+        WHERE auto_weekly_enabled = 1
+          AND status = 'active'
+          AND (project_end_date IS NULL OR project_end_date >= ?)
+          AND (paused_until IS NULL OR paused_until < ?)
+        """,
+        (today, today),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def create_project_run_log(
+    conn: sqlite3.Connection,
+    project_id: str,
+    run_date: str,
+    status: str,
+    *,
+    error_type: str | None = None,
+    error_message: str | None = None,
+    reports_filed: int = 0,
+    duration_ms: int | None = None,
+) -> str:
+    """Insert a project_run_log row and return its UUID."""
+    import uuid
+
+    entry_id = str(uuid.uuid4())
+    conn.execute(
+        """
+        INSERT INTO project_run_log
+            (id, project_id, run_date, status, error_type, error_message,
+             reports_filed, duration_ms, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            entry_id,
+            project_id,
+            run_date,
+            status,
+            error_type,
+            error_message,
+            reports_filed,
+            duration_ms,
+            _now(),
+        ),
+    )
+    conn.commit()
+    return entry_id
+
+
+def get_project_run_log(
+    conn: sqlite3.Connection, project_id: str, limit: int = 30
+) -> list[dict[str, Any]]:
+    """Return the most recent run log entries for a project, newest first."""
+    rows = conn.execute(
+        "SELECT * FROM project_run_log WHERE project_id = ? ORDER BY run_date DESC LIMIT ?",
+        (project_id, limit),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def update_project_run_state(
+    conn: sqlite3.Connection,
+    project_id: str,
+    last_run_at: str,
+    last_run_status: str,
+    last_successful_run_at: str | None = None,
+) -> None:
+    """Update last_run_at, last_run_status (and optionally last_successful_run_at) on the project row."""
+    if last_successful_run_at is not None:
+        conn.execute(
+            """
+            UPDATE projects
+               SET last_run_at = ?,
+                   last_run_status = ?,
+                   last_successful_run_at = ?
+             WHERE id = ?
+            """,
+            (last_run_at, last_run_status, last_successful_run_at, project_id),
+        )
+    else:
+        conn.execute(
+            """
+            UPDATE projects
+               SET last_run_at = ?,
+                   last_run_status = ?
+             WHERE id = ?
+            """,
+            (last_run_at, last_run_status, project_id),
+        )
+    conn.commit()
+
+
+def get_company_dashboard(conn: sqlite3.Connection, company_id: str) -> dict:
+    """Return project health counts and recent failures for a company dashboard."""
+    # Count projects by status bucket
+    row = conn.execute(
+        """
+        SELECT
+            COUNT(*) AS total_projects,
+            SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active,
+            SUM(CASE WHEN status = 'paused' THEN 1 ELSE 0 END) AS paused,
+            SUM(CASE WHEN status = 'setup_incomplete' THEN 1 ELSE 0 END) AS setup_incomplete,
+            SUM(
+                CASE
+                    WHEN auto_weekly_enabled = 1
+                         AND last_run_status IN ('failed', 'partial_failure')
+                    THEN 1 ELSE 0
+                END
+            ) AS failing
+          FROM projects
+         WHERE company_id = ?
+           AND (status IS NULL OR status != 'archived')
+        """,
+        (company_id,),
+    ).fetchone()
+
+    counts = {
+        "total_projects": row["total_projects"] or 0,
+        "active": row["active"] or 0,
+        "failing": row["failing"] or 0,
+        "paused": row["paused"] or 0,
+        "setup_incomplete": row["setup_incomplete"] or 0,
+    }
+
+    # Fetch last 5 failed run log entries for the company
+    failures = conn.execute(
+        """
+        SELECT rl.id, rl.run_date, rl.error_message, rl.error_type,
+               p.id AS project_id, p.project_number, p.project_name
+          FROM project_run_log rl
+          JOIN projects p ON p.id = rl.project_id
+         WHERE p.company_id = ?
+           AND rl.status IN ('failed', 'partial_failure')
+         ORDER BY rl.run_date DESC
+         LIMIT 5
+        """,
+        (company_id,),
+    ).fetchall()
+
+    counts["recent_failures"] = [
+        {
+            "project_id": f["project_id"],
+            "project_number": f["project_number"],
+            "project_name": f["project_name"],
+            "run_date": f["run_date"],
+            "error_message": f["error_message"],
+        }
+        for f in failures
+    ]
+
+    return counts

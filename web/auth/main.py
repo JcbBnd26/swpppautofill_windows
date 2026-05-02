@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from web.auth import db
@@ -58,6 +58,8 @@ from web.auth.models import (
     ProjectListResponse,
     ProjectUpdateRequest,
     ResetPasswordResponse,
+    RunDueReportsRequest,
+    RunDueReportsResponse,
     SessionInfo,
     SessionListResponse,
     SetPasswordRequest,
@@ -69,6 +71,10 @@ from web.auth.models import (
     TemplateVersionListResponse,
     UserInfo,
     UserListResponse,
+    CompanyDashboardResponse,
+    ProjectFailureSummary,
+    RunLogEntry,
+    RunLogResponse,
 )
 from web.log_config import configure_logging
 
@@ -1217,6 +1223,104 @@ def update_project_settings(
     return SuccessResponse()
 
 
+# ── Company Dashboard + Run Log + PM Run Trigger (IR-5) ──────────────────
+
+
+@app.get("/companies/{company_id}/dashboard", response_model=CompanyDashboardResponse)
+def get_company_dashboard(
+    company_id: str,
+    user: dict[str, Any] = Depends(get_current_user),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    """Company health dashboard (project counts + recent failures)."""
+    if not user.get("is_platform_admin"):
+        membership = db.get_company_user(conn, user["id"], company_id)
+        if not membership:
+            raise HTTPException(status_code=403, detail="Not a member of this company")
+
+    data = db.get_company_dashboard(conn, company_id)
+    return CompanyDashboardResponse(
+        total_projects=data["total_projects"],
+        active=data["active"],
+        failing=data["failing"],
+        paused=data["paused"],
+        setup_incomplete=data["setup_incomplete"],
+        recent_failures=[ProjectFailureSummary(**f) for f in data["recent_failures"]],
+    )
+
+
+@app.get(
+    "/companies/{company_id}/projects/{project_id}/run-log",
+    response_model=RunLogResponse,
+)
+def get_project_run_log(
+    company_id: str,
+    project_id: str,
+    limit: int = Query(default=30, le=100),
+    user: dict[str, Any] = Depends(get_current_user),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    """Return run log entries for a project (newest first)."""
+    if not user.get("is_platform_admin"):
+        membership = db.get_company_user(conn, user["id"], company_id)
+        if not membership:
+            raise HTTPException(status_code=403, detail="Not a member of this company")
+
+    project = db.get_project_for_company(conn, project_id, company_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    entries = db.get_project_run_log(conn, project_id, limit=limit)
+    return RunLogResponse(entries=[RunLogEntry(**e) for e in entries])
+
+
+@app.post(
+    "/companies/{company_id}/run-due-reports",
+    response_model=RunDueReportsResponse,
+)
+def run_company_reports(
+    company_id: str,
+    body: RunDueReportsRequest,
+    user: dict[str, Any] = Depends(get_current_user),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    """Trigger the reconciliation scheduler scoped to this company (pm or company_admin)."""
+    import time
+
+    from web.scheduler.run_due_reports import run_due_reports
+
+    if not user.get("is_platform_admin"):
+        membership = db.get_company_user(conn, user["id"], company_id)
+        if not membership:
+            raise HTTPException(status_code=403, detail="Not a member of this company")
+        if membership["role"] not in ("company_admin", "pm"):
+            raise HTTPException(
+                status_code=403,
+                detail="Requires company_admin or pm role",
+            )
+
+    start_ms = time.monotonic()
+    result = run_due_reports(conn, dry_run=False, force=body.force, company_id=company_id)
+    duration_ms = int((time.monotonic() - start_ms) * 1000)
+
+    log.info(
+        "run-due-reports triggered by company member: company=%s projects=%d filed=%d failures=%d skipped=%d",
+        company_id,
+        result["projects_processed"],
+        result["reports_filed"],
+        result["failures"],
+        result["skipped"],
+    )
+
+    return RunDueReportsResponse(
+        projects_processed=result["projects_processed"],
+        reports_filed=result["reports_filed"],
+        failures=result["failures"],
+        skipped=result["skipped"],
+        duration_ms=duration_ms,
+    )
+
+
 # ── Project Template Versions (IR-2) ─────────────────────────────────────
 
 
@@ -1825,6 +1929,42 @@ def list_companies(
             )
             for c in companies
         ]
+    )
+
+
+# ── Platform Admin: Scheduler ─────────────────────────────────────────────
+
+
+@app.post("/admin/run-due-reports", response_model=RunDueReportsResponse)
+def run_due_reports_endpoint(
+    body: RunDueReportsRequest,
+    _admin: dict[str, Any] = Depends(require_platform_admin),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    """Trigger the reconciliation scheduler immediately (platform admin only)."""
+    import time
+
+    from web.scheduler.run_due_reports import run_due_reports
+
+    start_ms = time.monotonic()
+    result = run_due_reports(conn, dry_run=False, force=body.force)
+    duration_ms = int((time.monotonic() - start_ms) * 1000)
+
+    log.info(
+        "run-due-reports triggered by admin: projects=%d filed=%d failures=%d skipped=%d duration_ms=%d",
+        result["projects_processed"],
+        result["reports_filed"],
+        result["failures"],
+        result["skipped"],
+        duration_ms,
+    )
+
+    return RunDueReportsResponse(
+        projects_processed=result["projects_processed"],
+        reports_filed=result["reports_filed"],
+        failures=result["failures"],
+        skipped=result["skipped"],
+        duration_ms=duration_ms,
     )
 
 

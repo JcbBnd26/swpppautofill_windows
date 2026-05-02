@@ -1,0 +1,10 @@
+[Unit]
+Description=SWPPP Scheduler Timer — daily at 06:00
+Requires=tools-scheduler.service
+
+[Timer]
+OnCalendar=*-*-* 06:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

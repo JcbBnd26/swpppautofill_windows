@@ -440,3 +440,53 @@ class MailboxProjectView(BaseModel):
     site_address: str
     entry_count: int
     entries: list[MailboxEntryPublic]
+
+
+# ── Scheduler (IR-4) ────────────────────────────────────────────────────
+
+
+class RunDueReportsRequest(BaseModel):
+    force: bool = False
+
+
+class RunDueReportsResponse(BaseModel):
+    projects_processed: int
+    reports_filed: int
+    failures: int
+    skipped: int
+    duration_ms: int
+
+
+# ── PM Dashboard (IR-5) ──────────────────────────────────────────────────
+
+
+class ProjectFailureSummary(BaseModel):
+    project_id: str
+    project_number: str
+    project_name: str
+    run_date: str
+    error_message: str | None = None
+
+
+class CompanyDashboardResponse(BaseModel):
+    total_projects: int
+    active: int
+    failing: int
+    paused: int
+    setup_incomplete: int
+    recent_failures: list[ProjectFailureSummary]
+
+
+class RunLogEntry(BaseModel):
+    id: str
+    run_date: str
+    status: str
+    error_type: str | None = None
+    error_message: str | None = None
+    reports_filed: int
+    duration_ms: int | None = None
+    created_at: str
+
+
+class RunLogResponse(BaseModel):
+    entries: list[RunLogEntry]

@@ -1,0 +1,18 @@
+[Unit]
+Description=SWPPP Scheduler — run due weekly and rain-event reports
+After=network.target
+
+[Service]
+Type=oneshot
+User=tools
+Group=tools
+WorkingDirectory=/opt/tools/repo
+Environment=PYTHONPATH=/opt/tools/repo
+Environment=TOOLS_DATA_DIR=/opt/tools/data
+Environment=TOOLS_LOG_LEVEL=INFO
+ExecStart=/opt/tools/venv/bin/python -m web.scheduler.main
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

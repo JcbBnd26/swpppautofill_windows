@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dashboard | Company Tools</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+</head>
+
+<body class="bg-gray-100 min-h-screen">
+
+    <div x-data="dashboardApp()" x-init="init()">
+
+        <!-- Header -->
+        <header class="bg-white shadow-sm">
+            <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+                <div class="flex items-center gap-4">
+                    <a href="/portal/projects.html" class="text-blue-600 hover:underline text-sm">← Projects</a>
+                    <h1 class="text-lg font-semibold text-gray-800">Company Dashboard</h1>
+                </div>
+                <div class="flex items-center gap-4 text-sm text-gray-600">
+                    <span x-text="user.display_name"></span>
+                    <button @click="logout()" class="text-red-600 hover:underline">Logout</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Loading -->
+        <div x-show="loading" class="text-center mt-20 text-gray-500">Loading dashboard…</div>
+
+        <!-- Error -->
+        <div x-show="error" class="max-w-7xl mx-auto px-6 py-10">
+            <div class="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700" x-text="error"></div>
+        </div>
+
+        <!-- Main Content -->
+        <main x-show="!loading && !error" class="max-w-7xl mx-auto px-6 py-10 space-y-8">
+
+            <!-- Stat Cards -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div class="bg-white rounded-xl border border-gray-200 p-6">
+                    <p class="text-sm text-gray-500 mb-1">Total Projects</p>
+                    <p class="text-3xl font-bold text-gray-800" x-text="dashboard.total_projects ?? 0"></p>
+                </div>
+                <div class="bg-white rounded-xl border border-gray-200 p-6">
+                    <p class="text-sm text-gray-500 mb-1">Active</p>
+                    <p class="text-3xl font-bold text-green-600" x-text="dashboard.active ?? 0"></p>
+                </div>
+                <div class="bg-white rounded-xl border border-gray-200 p-6">
+                    <p class="text-sm text-gray-500 mb-1">Failing</p>
+                    <p class="text-3xl font-bold text-red-500" x-text="dashboard.failing ?? 0"></p>
+                </div>
+                <div class="bg-white rounded-xl border border-gray-200 p-6">
+                    <p class="text-sm text-gray-500 mb-1">Paused / Incomplete</p>
+                    <p class="text-3xl font-bold text-yellow-500"
+                        x-text="(dashboard.paused ?? 0) + (dashboard.setup_incomplete ?? 0)"></p>
+                </div>
+            </div>
+
+            <!-- Run Reports Button -->
+            <div class="bg-white rounded-xl border border-gray-200 p-6">
+                <div class="flex items-center justify-between flex-wrap gap-4">
+                    <div>
+                        <h2 class="text-base font-semibold text-gray-800">Run Reports Now</h2>
+                        <p class="text-sm text-gray-500 mt-0.5">Trigger the auto-report scheduler for all projects in your company that are due.</p>
+                    </div>
+                    <button @click="runReports()"
+                        :disabled="runLoading"
+                        class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg text-sm font-medium transition disabled:opacity-50 flex items-center gap-2">
+                        <svg x-show="runLoading" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                        </svg>
+                        <span x-show="!runLoading">Run Reports</span>
+                        <span x-show="runLoading">Running…</span>
+                    </button>
+                </div>
+
+                <!-- Run Result -->
+                <div x-show="runResult" class="mt-4 p-4 bg-gray-50 rounded-lg text-sm text-gray-700">
+                    <p class="font-medium mb-2">Run complete</p>
+                    <div class="flex gap-6 text-sm">
+                        <span>Projects processed: <strong x-text="runResult?.projects_processed"></strong></span>
+                        <span>Reports filed: <strong class="text-green-700" x-text="runResult?.reports_filed"></strong></span>
+                        <span x-show="runResult?.failures > 0">Failures: <strong class="text-red-600" x-text="runResult?.failures"></strong></span>
+                        <span x-show="runResult?.skipped > 0">Skipped: <strong x-text="runResult?.skipped"></strong></span>
+                    </div>
+                </div>
+
+                <p x-show="runError" x-text="runError" class="mt-4 text-sm text-red-600"></p>
+            </div>
+
+            <!-- Recent Failures -->
+            <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h2 class="text-base font-semibold text-gray-800">Recent Failures</h2>
+                </div>
+
+                <div x-show="(dashboard.recent_failures ?? []).length === 0" class="px-6 py-8 text-sm text-gray-500 text-center">
+                    No recent failures — all auto-reporting projects are healthy.
+                </div>
+
+                <div x-show="(dashboard.recent_failures ?? []).length > 0">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-50 border-b border-gray-200">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Project #</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Project Name</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Error</th>
+                                <th class="px-6 py-3"></th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-200">
+                            <template x-for="f in (dashboard.recent_failures ?? [])" :key="f.project_id + f.run_date">
+                                <tr class="hover:bg-gray-50 transition">
+                                    <td class="px-6 py-4 font-medium text-gray-900" x-text="f.project_number"></td>
+                                    <td class="px-6 py-4 text-gray-700" x-text="f.project_name"></td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-gray-500" x-text="f.run_date"></td>
+                                    <td class="px-6 py-4 text-red-600 text-xs" x-text="f.error_message || '—'"></td>
+                                    <td class="px-6 py-4 text-right">
+                                        <a :href="'/portal/project-detail.html?id=' + f.project_id"
+                                            class="text-blue-600 hover:underline text-xs">View →</a>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <script>
+        function dashboardApp() {
+            return {
+                loading: true,
+                error: '',
+                user: { display_name: '', company_id: '' },
+                companyId: '',
+                dashboard: {},
+                runLoading: false,
+                runResult: null,
+                runError: '',
+
+                async init() {
+                    try {
+                        const meRes = await fetch('/auth/me', { credentials: 'same-origin' });
+                        if (!meRes.ok) {
+                            window.location.href = '/auth/login';
+                            return;
+                        }
+                        this.user = await meRes.json();
+
+                        this.companyId = this.user.company_id || this.extractCompanyFromMemberships();
+                        if (!this.companyId) {
+                            this.error = 'No company membership found. Please contact your administrator.';
+                            this.loading = false;
+                            return;
+                        }
+
+                        await this.loadDashboard();
+                    } catch (err) {
+                        console.error('Error loading dashboard:', err);
+                        this.error = err.message || 'Failed to load dashboard';
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                async loadDashboard() {
+                    const res = await fetch(`/auth/companies/${this.companyId}/dashboard`, {
+                        credentials: 'same-origin'
+                    });
+                    if (!res.ok) throw new Error(`Failed to load dashboard: ${res.status}`);
+                    this.dashboard = await res.json();
+                },
+
+                async runReports() {
+                    this.runLoading = true;
+                    this.runResult = null;
+                    this.runError = '';
+                    try {
+                        const res = await fetch(`/auth/companies/${this.companyId}/run-due-reports`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'same-origin',
+                            body: JSON.stringify({ force: false })
+                        });
+                        if (!res.ok) {
+                            const err = await res.json();
+                            throw new Error(err.detail || 'Run failed');
+                        }
+                        this.runResult = await res.json();
+                        // Refresh dashboard counts after run
+                        await this.loadDashboard();
+                    } catch (err) {
+                        console.error('Error running reports:', err);
+                        this.runError = err.message || 'Failed to run reports';
+                    } finally {
+                        this.runLoading = false;
+                    }
+                },
+
+                extractCompanyFromMemberships() {
+                    if (this.user.companies && this.user.companies.length > 0) {
+                        return this.user.companies[0].id;
+                    }
+                    return null;
+                },
+
+                async logout() {
+                    try {
+                        await fetch('/auth/logout', {
+                            method: 'POST',
+                            credentials: 'same-origin'
+                        });
+                    } finally {
+                        window.location.href = '/auth/login';
+                    }
+                }
+            };
+        }
+    </script>
+
+</body>
+
+</html>

@@ -140,6 +140,48 @@
                             <p class="text-base text-gray-900"
                                 x-text="formatDate(project.last_successful_run_at) || '—'"></p>
                         </div>
+
+                        <!-- Run History -->
+                        <div class="pt-6 border-t border-gray-200">
+                            <h3 class="text-base font-semibold text-gray-800 mb-4">Run History</h3>
+                            <div x-show="runLogLoading" class="text-sm text-gray-400">Loading run history…</div>
+                            <div x-show="!runLogLoading && runLog.length === 0" class="text-sm text-gray-500">No runs recorded yet.</div>
+                            <div x-show="!runLogLoading && runLog.length > 0" class="overflow-x-auto">
+                                <table class="w-full text-sm">
+                                    <thead>
+                                        <tr class="border-b border-gray-200 text-left">
+                                            <th class="pb-2 pr-4 font-medium text-gray-500">Date</th>
+                                            <th class="pb-2 pr-4 font-medium text-gray-500">Status</th>
+                                            <th class="pb-2 pr-4 font-medium text-gray-500">Filed</th>
+                                            <th class="pb-2 pr-4 font-medium text-gray-500">Duration</th>
+                                            <th class="pb-2 font-medium text-gray-500">Error</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-gray-100">
+                                        <template x-for="entry in runLog" :key="entry.id">
+                                            <tr>
+                                                <td class="py-2 pr-4 whitespace-nowrap" x-text="entry.run_date"></td>
+                                                <td class="py-2 pr-4 whitespace-nowrap">
+                                                    <span class="inline-block px-2 py-0.5 rounded text-xs font-medium"
+                                                        :class="{
+                                                            'bg-green-100 text-green-700': entry.status === 'ok',
+                                                            'bg-red-100 text-red-700': entry.status === 'failed',
+                                                            'bg-orange-100 text-orange-700': entry.status === 'partial_failure',
+                                                            'bg-yellow-100 text-yellow-700': entry.status === 'skipped',
+                                                            'bg-gray-100 text-gray-600': !['ok','failed','partial_failure','skipped'].includes(entry.status)
+                                                        }" x-text="entry.status"></span>
+                                                </td>
+                                                <td class="py-2 pr-4" x-text="entry.reports_filed"></td>
+                                                <td class="py-2 pr-4 whitespace-nowrap"
+                                                    x-text="entry.duration_ms != null ? (entry.duration_ms / 1000).toFixed(1) + 's' : '—'"></td>
+                                                <td class="py-2 text-xs text-red-600"
+                                                    x-text="entry.error_message || ''"></td>
+                                            </tr>
+                                        </template>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- TAB 2: Template -->
@@ -353,32 +395,103 @@
 
                     <!-- TAB 3: Settings -->
                     <div x-show="activeTab === 'settings'" class="space-y-6">
-                        <h2 class="text-xl font-semibold text-gray-800">Project Settings</h2>
-                        <div class="bg-gray-50 border border-gray-200 rounded-lg p-6 text-center">
-                            <svg class="w-12 h-12 mx-auto text-gray-300 mb-3" fill="none" stroke="currentColor"
-                                viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                                <circle cx="12" cy="12" r="3" />
-                            </svg>
-                            <h3 class="text-base font-medium text-gray-700 mb-2">Automation Settings Coming Soon</h3>
-                            <p class="text-sm text-gray-500">Auto-weekly scheduling, notifications, and compliance
-                                settings will be available in IR-4.</p>
-                        </div>
+                        <h2 class="text-xl font-semibold text-gray-800">Automation Settings</h2>
+
+                        <form @submit.prevent="saveSettings()" class="space-y-6 max-w-lg">
+
+                            <!-- Auto-Weekly Toggle -->
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <p class="text-sm font-medium text-gray-700">Auto-Weekly Reports</p>
+                                    <p class="text-xs text-gray-500 mt-0.5">Automatically generate the weekly SWPPP inspection report on the scheduled day.</p>
+                                </div>
+                                <button type="button" @click="settingsForm.auto_weekly_enabled = !settingsForm.auto_weekly_enabled"
+                                    :class="settingsForm.auto_weekly_enabled ? 'bg-blue-600' : 'bg-gray-200'"
+                                    class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors">
+                                    <span :class="settingsForm.auto_weekly_enabled ? 'translate-x-6' : 'translate-x-1'"
+                                        class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform"></span>
+                                </button>
+                            </div>
+
+                            <!-- Schedule Day of Week -->
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1.5">Report Day of Week</label>
+                                <select x-model.number="settingsForm.schedule_day_of_week"
+                                    class="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                    <option value="0">Monday</option>
+                                    <option value="1">Tuesday</option>
+                                    <option value="2">Wednesday</option>
+                                    <option value="3">Thursday</option>
+                                    <option value="4">Friday</option>
+                                    <option value="5">Saturday</option>
+                                    <option value="6">Sunday</option>
+                                </select>
+                                <p class="text-xs text-gray-500 mt-1">Reports are generated on this day each week.</p>
+                            </div>
+
+                            <!-- Rain Threshold -->
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1.5">Rain Threshold (inches)</label>
+                                <input type="number" step="0.01" min="0" x-model.number="settingsForm.rain_threshold_inches"
+                                    class="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                <p class="text-xs text-gray-500 mt-1">A rain-event report is generated when rainfall exceeds this amount.</p>
+                            </div>
+
+                            <!-- Pause Until -->
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1.5">Pause Until</label>
+                                <input type="date" x-model="settingsForm.paused_until"
+                                    class="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                <p class="text-xs text-gray-500 mt-1">Leave blank to not pause. Auto-reporting resumes after this date.</p>
+                            </div>
+
+                            <div class="flex items-center gap-3 pt-4 border-t border-gray-200">
+                                <button type="submit" :disabled="settingsSaving"
+                                    class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg text-sm font-medium transition disabled:opacity-50">
+                                    <span x-show="!settingsSaving">Save Settings</span>
+                                    <span x-show="settingsSaving">Saving…</span>
+                                </button>
+                                <span x-show="settingsSaveOk" class="text-sm text-green-600">✓ Saved</span>
+                                <span x-show="settingsSaveError" x-text="settingsSaveError" class="text-sm text-red-600"></span>
+                            </div>
+                        </form>
                     </div>
 
                     <!-- TAB 4: Mailbox -->
-                    <div x-show="activeTab === 'mailbox'" class="space-y-6">
-                        <h2 class="text-xl font-semibold text-gray-800">Public Mailbox</h2>
-                        <div class="bg-gray-50 border border-gray-200 rounded-lg p-6 text-center">
-                            <svg class="w-12 h-12 mx-auto text-gray-300 mb-3" fill="none" stroke="currentColor"
-                                viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                            </svg>
-                            <h3 class="text-base font-medium text-gray-700 mb-2">Mailbox Coming Soon</h3>
-                            <p class="text-sm text-gray-500">Public mailbox for receiving weekly reports will be
-                                available in IR-3.</p>
+                    <div x-show="activeTab === 'mailbox'" x-init="loadMailbox()" class="space-y-6">
+                        <div class="flex items-center justify-between">
+                            <h2 class="text-xl font-semibold text-gray-800">Public Mailbox</h2>
+                            <a :href="'/mailbox/?project=' + project.project_number"
+                                class="text-sm text-blue-600 hover:underline">View full mailbox →</a>
+                        </div>
+
+                        <div x-show="mailboxLoading" class="text-sm text-gray-400">Loading mailbox…</div>
+                        <div x-show="!mailboxLoading && mailboxEntries.length === 0" class="text-sm text-gray-500">No reports filed yet.</div>
+
+                        <div x-show="!mailboxLoading && mailboxEntries.length > 0" class="overflow-x-auto">
+                            <table class="w-full text-sm">
+                                <thead>
+                                    <tr class="border-b border-gray-200 text-left">
+                                        <th class="pb-2 pr-4 font-medium text-gray-500">Date</th>
+                                        <th class="pb-2 pr-4 font-medium text-gray-500">Type</th>
+                                        <th class="pb-2 pr-4 font-medium text-gray-500">Mode</th>
+                                        <th class="pb-2 font-medium text-gray-500">Download</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-gray-100">
+                                    <template x-for="entry in mailboxEntries.slice(0, 5)" :key="entry.id">
+                                        <tr>
+                                            <td class="py-2 pr-4" x-text="entry.report_date"></td>
+                                            <td class="py-2 pr-4 capitalize" x-text="entry.report_type"></td>
+                                            <td class="py-2 pr-4 capitalize" x-text="entry.generation_mode"></td>
+                                            <td class="py-2">
+                                                <a :href="'/mailbox/' + project.project_number + '/download/' + entry.id"
+                                                    class="text-blue-600 hover:underline text-xs">PDF</a>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
                         </div>
                     </div>
 
@@ -403,6 +516,23 @@
                 versions: [],
                 activeVersion: null,
                 activeVersionData: {},
+                // Run history
+                runLog: [],
+                runLogLoading: false,
+                // Settings form
+                settingsForm: {
+                    auto_weekly_enabled: false,
+                    schedule_day_of_week: 5,
+                    rain_threshold_inches: 0.5,
+                    paused_until: ''
+                },
+                settingsSaving: false,
+                settingsSaveOk: false,
+                settingsSaveError: '',
+                // Mailbox
+                mailboxEntries: [],
+                mailboxLoading: false,
+                mailboxLoaded: false,
                 templateForm: {
                     job_piece: '',
                     contract_id: '',
@@ -441,6 +571,7 @@
 
                         await this.loadProject(companyId, projectId);
                         await this.loadTemplateVersions(companyId, projectId);
+                        this.loadRunLog(companyId, projectId);
                     } catch (err) {
                         console.error('Error loading project:', err);
                         this.error = err.message || 'Failed to load project';
@@ -455,6 +586,82 @@
                     });
                     if (!res.ok) throw new Error('Failed to load project');
                     this.project = await res.json();
+                    // Populate settings form from project data
+                    this.settingsForm = {
+                        auto_weekly_enabled: !!this.project.auto_weekly_enabled,
+                        schedule_day_of_week: this.project.schedule_day_of_week ?? 5,
+                        rain_threshold_inches: this.project.rain_threshold_inches ?? 0.5,
+                        paused_until: this.project.paused_until || ''
+                    };
+                },
+
+                async loadRunLog(companyId, projectId) {
+                    this.runLogLoading = true;
+                    try {
+                        const res = await fetch(`/auth/companies/${companyId}/projects/${projectId}/run-log`, {
+                            credentials: 'same-origin'
+                        });
+                        if (res.ok) {
+                            const data = await res.json();
+                            this.runLog = data.entries || [];
+                        }
+                    } catch (err) {
+                        console.error('Error loading run log:', err);
+                    } finally {
+                        this.runLogLoading = false;
+                    }
+                },
+
+                async loadMailbox() {
+                    if (this.mailboxLoaded || !this.project.project_number) return;
+                    this.mailboxLoading = true;
+                    try {
+                        const res = await fetch(`/mailbox/${this.project.project_number}`);
+                        if (res.ok) {
+                            const data = await res.json();
+                            this.mailboxEntries = data.entries || [];
+                        }
+                    } catch (err) {
+                        console.error('Error loading mailbox:', err);
+                    } finally {
+                        this.mailboxLoading = false;
+                        this.mailboxLoaded = true;
+                    }
+                },
+
+                async saveSettings() {
+                    this.settingsSaving = true;
+                    this.settingsSaveOk = false;
+                    this.settingsSaveError = '';
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const projectId = urlParams.get('id');
+                    const companyId = this.user.company_id || this.extractCompanyFromMemberships();
+                    try {
+                        const payload = {
+                            auto_weekly_enabled: this.settingsForm.auto_weekly_enabled ? 1 : 0,
+                            schedule_day_of_week: this.settingsForm.schedule_day_of_week,
+                            rain_threshold_inches: this.settingsForm.rain_threshold_inches,
+                            paused_until: this.settingsForm.paused_until || null
+                        };
+                        const res = await fetch(`/auth/companies/${companyId}/projects/${projectId}`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'same-origin',
+                            body: JSON.stringify(payload)
+                        });
+                        if (!res.ok) {
+                            const err = await res.json();
+                            throw new Error(err.detail || 'Failed to save settings');
+                        }
+                        this.settingsSaveOk = true;
+                        setTimeout(() => { this.settingsSaveOk = false; }, 3000);
+                        await this.loadProject(companyId, projectId);
+                    } catch (err) {
+                        console.error('Error saving settings:', err);
+                        this.settingsSaveError = err.message || 'Failed to save';
+                    } finally {
+                        this.settingsSaving = false;
+                    }
                 },
 
                 async loadTemplateVersions(companyId, projectId) {
