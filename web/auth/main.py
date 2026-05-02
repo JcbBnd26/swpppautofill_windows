@@ -1303,7 +1303,9 @@ def run_company_reports(
             )
 
     start_ms = time.monotonic()
-    result = run_due_reports(conn, dry_run=False, force=body.force, company_id=company_id)
+    result = run_due_reports(
+        conn, dry_run=False, force=body.force, company_id=company_id
+    )
     duration_ms = int((time.monotonic() - start_ms) * 1000)
 
     log.info(

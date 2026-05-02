@@ -1,4 +1,5 @@
 """IR-6: Platform admin health dashboard tests."""
+
 from __future__ import annotations
 
 import sqlite3
@@ -9,7 +10,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from web.auth import db, main
-
 
 # ── Test helpers ─────────────────────────────────────────────────────────────
 
@@ -35,7 +35,9 @@ def _seed_company(conn: sqlite3.Connection) -> dict[str, str]:
         display_name=f"Co {suffix}",
         created_by=admin_id,
     )
-    db.add_company_user(conn, user_id=admin_id, company_id=company_id, role="company_admin")
+    db.add_company_user(
+        conn, user_id=admin_id, company_id=company_id, role="company_admin"
+    )
 
     project_id = db.create_project(
         conn,
