@@ -1,12 +1,12 @@
 # Build artifacts
 dist/
 build/
-*.spec
+*.egg-info/
+installer_output/
 
 # Python
 __pycache__/
 *.py[cod]
-*.egg-info/
 .pytest_cache/
 
 # Virtual environment
@@ -19,6 +19,3 @@ tmp_output/
 web/data/*.db
 web/data/*.db-wal
 web/data/*.db-shm
-
-# Vestigial docs
-misc_docs/
