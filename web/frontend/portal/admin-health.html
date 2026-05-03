@@ -181,7 +181,7 @@
                     }
 
                     // Load health data
-                    const res = await fetch('/auth/admin/platform-health', { credentials: 'include' });
+                    const res = await fetch('/admin/platform-health', { credentials: 'include' });
                     if (!res.ok) {
                         this.error = 'Failed to load platform health data.';
                         this.loading = false;
