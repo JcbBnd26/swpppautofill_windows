@@ -71,44 +71,91 @@
                 </p>
             </div>
 
-            <!-- Download All Button -->
-            <div x-show="activeProject.entry_count > 0">
-                <button @click="downloadAll"
-                    class="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500"
-                    :disabled="loading">
-                    <span x-show="!loading">Download All Reports (ZIP)</span>
-                    <span x-show="loading">Preparing download...</span>
-                </button>
-            </div>
+            <!-- ── Archived Project View (IR-7) ── -->
+            <template x-if="activeProject.is_archived">
+                <div class="space-y-4">
+                    <!-- Archived banner -->
+                    <div class="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-3 text-sm text-yellow-800">
+                        <strong>Project Archived</strong>
+                        <template x-if="activeProject.archived_at">
+                            <span> — <span
+                                    x-text="new Date(activeProject.archived_at).toLocaleDateString()"></span></span>
+                        </template>
+                    </div>
 
-            <!-- Entries List -->
-            <div x-show="activeProject.entries && activeProject.entries.length > 0" class="space-y-3">
-                <h3 class="text-lg font-semibold text-gray-900">Reports</h3>
+                    <!-- NOT status -->
+                    <div class="text-sm">
+                        <template x-if="activeProject.not_on_file">
+                            <span class="text-green-700">✅ Notice of Termination on file</span>
+                        </template>
+                        <template x-if="!activeProject.not_on_file">
+                            <span class="text-yellow-700">⚠️ Notice of Termination not yet on file</span>
+                        </template>
+                    </div>
 
-                <template x-for="entry in activeProject.entries" :key="entry.id">
-                    <div class="bg-white rounded-lg shadow p-4 flex justify-between items-center">
-                        <div class="flex-1">
-                            <p class="font-medium text-gray-900" x-text="formatDate(entry.report_date)"></p>
-                            <p class="text-sm text-gray-600">
-                                <span x-text="formatReportType(entry.report_type)"></span>
-                                <template x-if="entry.file_size_bytes">
-                                    <span> • <span x-text="formatFileSize(entry.file_size_bytes)"></span></span>
-                                </template>
-                            </p>
+                    <!-- Archive ZIP download or spinner -->
+                    <template x-if="activeProject.archive_zip_ready">
+                        <a :href="`/mailbox/${encodeURIComponent(activeProject.project_number)}/archive/download`"
+                            class="inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition">
+                            ⬇ Download Complete Archive (ZIP)
+                        </a>
+                    </template>
+                    <template x-if="!activeProject.archive_zip_ready">
+                        <div class="flex items-center gap-2 text-sm text-gray-500">
+                            <svg class="animate-spin h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"
+                                    stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                            </svg>
+                            Archive being prepared — checking every few seconds…
                         </div>
-                        <button @click="downloadEntry(entry.id)"
-                            class="ml-4 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
-                            Download
+                    </template>
+                </div>
+            </template>
+
+            <!-- ── Active project: reports list ── -->
+            <template x-if="!activeProject.is_archived">
+                <div class="space-y-4">
+                    <!-- Download All Button -->
+                    <div x-show="activeProject.entry_count > 0">
+                        <button @click="downloadAll"
+                            class="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500"
+                            :disabled="loading">
+                            <span x-show="!loading">Download All Reports (ZIP)</span>
+                            <span x-show="loading">Preparing download...</span>
                         </button>
                     </div>
-                </template>
-            </div>
 
-            <!-- No Entries Message -->
-            <div x-show="!activeProject.entries || activeProject.entries.length === 0"
-                class="bg-white rounded-lg shadow p-6 text-center">
-                <p class="text-gray-600">No reports available yet.</p>
-            </div>
+                    <!-- Entries List -->
+                    <div x-show="activeProject.entries && activeProject.entries.length > 0" class="space-y-3">
+                        <h3 class="text-lg font-semibold text-gray-900">Reports</h3>
+
+                        <template x-for="entry in activeProject.entries" :key="entry.id">
+                            <div class="bg-white rounded-lg shadow p-4 flex justify-between items-center">
+                                <div class="flex-1">
+                                    <p class="font-medium text-gray-900" x-text="formatDate(entry.report_date)"></p>
+                                    <p class="text-sm text-gray-600">
+                                        <span x-text="formatReportType(entry.report_type)"></span>
+                                        <template x-if="entry.file_size_bytes">
+                                            <span> • <span x-text="formatFileSize(entry.file_size_bytes)"></span></span>
+                                        </template>
+                                    </p>
+                                </div>
+                                <button @click="downloadEntry(entry.id)"
+                                    class="ml-4 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+                                    Download
+                                </button>
+                            </div>
+                        </template>
+                    </div>
+
+                    <!-- No Entries Message -->
+                    <div x-show="!activeProject.entries || activeProject.entries.length === 0"
+                        class="bg-white rounded-lg shadow p-6 text-center">
+                        <p class="text-gray-600">No reports available yet.</p>
+                    </div>
+                </div>
+            </template>
         </div>
 
         <!-- Loading State -->
@@ -128,6 +175,7 @@
                 searchNumber: '',
                 recentProject: '',
                 activeProject: null,
+                archiveZipPoller: null,
 
                 // Lifecycle
                 init() {
@@ -156,6 +204,11 @@
                         this.activeProject = data;
                         this.state = 'active';
 
+                        // If archived and ZIP not ready, start polling
+                        if (data.is_archived && !data.archive_zip_ready) {
+                            this._startArchivePoller(data.project_number);
+                        }
+
                         // Save to cookie
                         this.setCookie('mailbox_project_number', this.searchNumber, 365);
                         this.recentProject = this.searchNumber;
@@ -174,6 +227,7 @@
                 },
 
                 backToSearch() {
+                    this._stopArchivePoller();
                     this.state = 'search';
                     this.searchNumber = '';
                     this.errorMessage = '';
@@ -226,6 +280,32 @@
                     }
                     const mb = kb / 1024;
                     return `${mb.toFixed(1)} MB`;
+                },
+
+                // ── Archive ZIP poller (IR-7) ──
+
+                _startArchivePoller(projectNumber) {
+                    this._stopArchivePoller();
+                    this.archiveZipPoller = setInterval(async () => {
+                        try {
+                            const res = await fetch(`/mailbox/${encodeURIComponent(projectNumber)}/archive/download`);
+                            if (res.status === 200) {
+                                // ZIP is ready — update state and stop polling
+                                if (this.activeProject) {
+                                    this.activeProject = { ...this.activeProject, archive_zip_ready: true };
+                                }
+                                this._stopArchivePoller();
+                            }
+                            // 202 → still preparing, keep polling
+                        } catch (e) { /* ignore network errors */ }
+                    }, 2000);
+                },
+
+                _stopArchivePoller() {
+                    if (this.archiveZipPoller !== null) {
+                        clearInterval(this.archiveZipPoller);
+                        this.archiveZipPoller = null;
+                    }
                 },
 
                 getCookie(name) {

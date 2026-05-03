@@ -1770,3 +1770,85 @@ def get_platform_dashboard(conn: sqlite3.Connection) -> dict:
     result["company_rollup"] = [dict(r) for r in rollup_rows]
 
     return result
+
+
+# ── Archive Flow (IR-7) ──────────────────────────────────────────────────
+
+
+def archive_project(
+    conn: sqlite3.Connection,
+    project_id: str,
+    user_id: str,
+    not_document_path: str | None = None,
+) -> None:
+    """Set project status to 'archived', disable auto-weekly, record audit fields.
+
+    Also archives all template versions for the project.
+    """
+    now = _now()
+    conn.execute(
+        """UPDATE projects SET
+               status = 'archived',
+               auto_weekly_enabled = 0,
+               archived_at = ?,
+               archived_by_user_id = ?,
+               not_document_path = ?
+           WHERE id = ?""",
+        (now, user_id, not_document_path, project_id),
+    )
+    archive_template_versions_for_project(conn, project_id)
+    log.info("Project archived: project_id=%s by_user=%s", project_id, user_id)
+
+
+def unarchive_project(conn: sqlite3.Connection, project_id: str) -> None:
+    """Restore an archived project to 'active' status.
+
+    Clears all archive tracking fields.  Does NOT re-enable auto_weekly —
+    the PM must explicitly turn that back on.
+    """
+    conn.execute(
+        """UPDATE projects SET
+               status = 'active',
+               archived_at = NULL,
+               archived_by_user_id = NULL,
+               archive_zip_path = NULL
+           WHERE id = ?""",
+        (project_id,),
+    )
+    log.info("Project unarchived: project_id=%s", project_id)
+
+
+def set_archive_zip_path(
+    conn: sqlite3.Connection, project_id: str, zip_path: str
+) -> None:
+    """Record the path of the completed archive ZIP file."""
+    conn.execute(
+        "UPDATE projects SET archive_zip_path = ? WHERE id = ?",
+        (zip_path, project_id),
+    )
+    log.info("Archive ZIP path set: project_id=%s path=%s", project_id, zip_path)
+
+
+def add_not_document(
+    conn: sqlite3.Connection,
+    project_id: str,
+    user_id: str,
+    not_path: str,
+) -> None:
+    """Record a newly-uploaded Notice of Termination document.
+
+    Clears archive_zip_path so the BackgroundTask knows to regenerate the ZIP.
+    """
+    now = _now()
+    conn.execute(
+        """UPDATE projects SET
+               not_document_path = ?,
+               not_uploaded_at = ?,
+               not_uploaded_by = ?,
+               archive_zip_path = NULL
+           WHERE id = ?""",
+        (not_path, now, user_id, project_id),
+    )
+    log.info(
+        "NOT document added: project_id=%s path=%s by=%s", project_id, not_path, user_id
+    )

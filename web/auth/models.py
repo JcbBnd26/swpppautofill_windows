@@ -440,6 +440,11 @@ class MailboxProjectView(BaseModel):
     site_address: str
     entry_count: int
     entries: list[MailboxEntryPublic]
+    # Archive fields (IR-7)
+    is_archived: bool = False
+    archived_at: str | None = None
+    archive_zip_ready: bool = False
+    not_on_file: bool = False
 
 
 # ── Scheduler (IR-4) ────────────────────────────────────────────────────
@@ -523,3 +528,27 @@ class PlatformDashboardResponse(BaseModel):
     last_run_at: str | None = None
     problem_projects: list[ProblemProjectRow]
     company_rollup: list[CompanyHealthRow]
+
+
+# ── Archive Flow (IR-7) ──────────────────────────────────────────────────
+
+
+class ProjectArchiveRequest(BaseModel):
+    archive_without_not: bool = False
+
+
+class ProjectArchiveResponse(BaseModel):
+    project_id: str
+    archived_at: str
+    archive_zip_ready: bool
+
+
+class ProjectArchiveStatusResponse(BaseModel):
+    archive_zip_ready: bool
+    archive_zip_path: str | None = None
+
+
+class NotUploadResponse(BaseModel):
+    project_id: str
+    not_document_path: str
+    not_uploaded_at: str

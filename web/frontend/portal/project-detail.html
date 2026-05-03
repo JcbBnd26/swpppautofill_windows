@@ -145,7 +145,8 @@
                         <div class="pt-6 border-t border-gray-200">
                             <h3 class="text-base font-semibold text-gray-800 mb-4">Run History</h3>
                             <div x-show="runLogLoading" class="text-sm text-gray-400">Loading run history…</div>
-                            <div x-show="!runLogLoading && runLog.length === 0" class="text-sm text-gray-500">No runs recorded yet.</div>
+                            <div x-show="!runLogLoading && runLog.length === 0" class="text-sm text-gray-500">No runs
+                                recorded yet.</div>
                             <div x-show="!runLogLoading && runLog.length > 0" class="overflow-x-auto">
                                 <table class="w-full text-sm">
                                     <thead>
@@ -173,7 +174,8 @@
                                                 </td>
                                                 <td class="py-2 pr-4" x-text="entry.reports_filed"></td>
                                                 <td class="py-2 pr-4 whitespace-nowrap"
-                                                    x-text="entry.duration_ms != null ? (entry.duration_ms / 1000).toFixed(1) + 's' : '—'"></td>
+                                                    x-text="entry.duration_ms != null ? (entry.duration_ms / 1000).toFixed(1) + 's' : '—'">
+                                                </td>
                                                 <td class="py-2 text-xs text-red-600"
                                                     x-text="entry.error_message || ''"></td>
                                             </tr>
@@ -403,9 +405,11 @@
                             <div class="flex items-center justify-between">
                                 <div>
                                     <p class="text-sm font-medium text-gray-700">Auto-Weekly Reports</p>
-                                    <p class="text-xs text-gray-500 mt-0.5">Automatically generate the weekly SWPPP inspection report on the scheduled day.</p>
+                                    <p class="text-xs text-gray-500 mt-0.5">Automatically generate the weekly SWPPP
+                                        inspection report on the scheduled day.</p>
                                 </div>
-                                <button type="button" @click="settingsForm.auto_weekly_enabled = !settingsForm.auto_weekly_enabled"
+                                <button type="button"
+                                    @click="settingsForm.auto_weekly_enabled = !settingsForm.auto_weekly_enabled"
                                     :class="settingsForm.auto_weekly_enabled ? 'bg-blue-600' : 'bg-gray-200'"
                                     class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors">
                                     <span :class="settingsForm.auto_weekly_enabled ? 'translate-x-6' : 'translate-x-1'"
@@ -431,10 +435,13 @@
 
                             <!-- Rain Threshold -->
                             <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1.5">Rain Threshold (inches)</label>
-                                <input type="number" step="0.01" min="0" x-model.number="settingsForm.rain_threshold_inches"
+                                <label class="block text-sm font-medium text-gray-700 mb-1.5">Rain Threshold
+                                    (inches)</label>
+                                <input type="number" step="0.01" min="0"
+                                    x-model.number="settingsForm.rain_threshold_inches"
                                     class="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                                <p class="text-xs text-gray-500 mt-1">A rain-event report is generated when rainfall exceeds this amount.</p>
+                                <p class="text-xs text-gray-500 mt-1">A rain-event report is generated when rainfall
+                                    exceeds this amount.</p>
                             </div>
 
                             <!-- Pause Until -->
@@ -442,7 +449,8 @@
                                 <label class="block text-sm font-medium text-gray-700 mb-1.5">Pause Until</label>
                                 <input type="date" x-model="settingsForm.paused_until"
                                     class="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                                <p class="text-xs text-gray-500 mt-1">Leave blank to not pause. Auto-reporting resumes after this date.</p>
+                                <p class="text-xs text-gray-500 mt-1">Leave blank to not pause. Auto-reporting resumes
+                                    after this date.</p>
                             </div>
 
                             <div class="flex items-center gap-3 pt-4 border-t border-gray-200">
@@ -452,9 +460,107 @@
                                     <span x-show="settingsSaving">Saving…</span>
                                 </button>
                                 <span x-show="settingsSaveOk" class="text-sm text-green-600">✓ Saved</span>
-                                <span x-show="settingsSaveError" x-text="settingsSaveError" class="text-sm text-red-600"></span>
+                                <span x-show="settingsSaveError" x-text="settingsSaveError"
+                                    class="text-sm text-red-600"></span>
                             </div>
                         </form>
+
+                        <!-- ── Archive Section (IR-7) ── -->
+                        <!-- Active project: show archive form -->
+                        <div x-show="project.status !== 'archived'" class="mt-8 border-t border-gray-200 pt-6">
+                            <h3 class="text-base font-semibold text-gray-800 mb-4">Archive Project</h3>
+                            <div class="space-y-4">
+                                <!-- Archive without NOT toggle -->
+                                <label class="flex items-center gap-3 cursor-pointer">
+                                    <input type="checkbox" x-model="archiveWithoutNot"
+                                        class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                                    <span class="text-sm text-gray-700">Archive without a Notice of Termination (NOT) —
+                                        upload it later</span>
+                                </label>
+
+                                <!-- NOT upload (grayed when toggle is on) -->
+                                <div :class="archiveWithoutNot ? 'opacity-40 pointer-events-none' : ''">
+                                    <label class="block text-sm font-medium text-gray-700 mb-1.5">Notice of Termination
+                                        (PDF or document)</label>
+                                    <input type="file" x-ref="notFileInput"
+                                        class="block text-sm text-gray-600 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
+                                </div>
+
+                                <div class="flex items-center gap-3 pt-2">
+                                    <button @click="archiveProject()" :disabled="archiving"
+                                        class="bg-red-600 hover:bg-red-700 text-white px-6 py-2.5 rounded-lg text-sm font-medium transition disabled:opacity-50">
+                                        <span x-show="!archiving">Archive Project</span>
+                                        <span x-show="archiving">Archiving…</span>
+                                    </button>
+                                    <span x-show="archiveError" x-text="archiveError"
+                                        class="text-sm text-red-600"></span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Archived project: show status + actions -->
+                        <div x-show="project.status === 'archived'"
+                            class="mt-8 border-t border-gray-200 pt-6 space-y-4">
+                            <div
+                                class="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-3 text-sm text-yellow-800">
+                                <strong>Project Archived</strong>
+                                <span x-show="project.archived_at"> — <span
+                                        x-text="project.archived_at ? new Date(project.archived_at).toLocaleDateString() : ''"></span></span>
+                            </div>
+
+                            <!-- NOT status -->
+                            <div class="text-sm">
+                                <span x-show="project.not_document_path" class="text-green-700">✅ Notice of Termination
+                                    on file</span>
+                                <span x-show="!project.not_document_path" class="text-yellow-700">⚠️ Notice of
+                                    Termination not yet uploaded</span>
+                            </div>
+
+                            <!-- Late NOT upload form (only when NOT is missing) -->
+                            <div x-show="!project.not_document_path" class="space-y-3">
+                                <label class="block text-sm font-medium text-gray-700">Upload Notice of
+                                    Termination</label>
+                                <input type="file" x-ref="lateNotFileInput"
+                                    class="block text-sm text-gray-600 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
+                                <div class="flex items-center gap-3">
+                                    <button @click="uploadLateNot()" :disabled="uploadingNot"
+                                        class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50">
+                                        <span x-show="!uploadingNot">Upload NOT</span>
+                                        <span x-show="uploadingNot">Uploading…</span>
+                                    </button>
+                                    <span x-show="notUploadError" x-text="notUploadError"
+                                        class="text-sm text-red-600"></span>
+                                </div>
+                            </div>
+
+                            <!-- ZIP status polling -->
+                            <div x-show="!archiveZipReady" class="flex items-center gap-2 text-sm text-gray-500">
+                                <svg class="animate-spin h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"
+                                        stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                                </svg>
+                                Archive ZIP being prepared…
+                            </div>
+                            <div x-show="archiveZipReady" class="text-sm">
+                                <a :href="'/mailbox/?project=' + project.project_number + '&download_archive=1'"
+                                    class="inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition">
+                                    ⬇ Download Complete Archive (ZIP)
+                                </a>
+                            </div>
+
+                            <!-- Unarchive (company_admin only) -->
+                            <div x-show="userRole === 'company_admin' || userRole === 'platform_admin'"
+                                class="pt-4 border-t border-gray-100">
+                                <button @click="unarchiveProject()" :disabled="unarchiving"
+                                    class="bg-gray-200 hover:bg-gray-300 text-gray-800 px-5 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50">
+                                    <span x-show="!unarchiving">Unarchive Project</span>
+                                    <span x-show="unarchiving">Unarchiving…</span>
+                                </button>
+                                <span x-show="unarchiveError" x-text="unarchiveError"
+                                    class="text-sm text-red-600 ml-3"></span>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- TAB 4: Mailbox -->
@@ -466,7 +572,8 @@
                         </div>
 
                         <div x-show="mailboxLoading" class="text-sm text-gray-400">Loading mailbox…</div>
-                        <div x-show="!mailboxLoading && mailboxEntries.length === 0" class="text-sm text-gray-500">No reports filed yet.</div>
+                        <div x-show="!mailboxLoading && mailboxEntries.length === 0" class="text-sm text-gray-500">No
+                            reports filed yet.</div>
 
                         <div x-show="!mailboxLoading && mailboxEntries.length > 0" class="overflow-x-auto">
                             <table class="w-full text-sm">
@@ -533,6 +640,17 @@
                 mailboxEntries: [],
                 mailboxLoading: false,
                 mailboxLoaded: false,
+                // Archive (IR-7)
+                archiveWithoutNot: false,
+                archiving: false,
+                archiveError: '',
+                archiveZipReady: false,
+                archiveZipPoller: null,
+                unarchiving: false,
+                unarchiveError: '',
+                uploadingNot: false,
+                notUploadError: '',
+                userRole: '',
                 templateForm: {
                     job_piece: '',
                     contract_id: '',
@@ -593,6 +711,25 @@
                         rain_threshold_inches: this.project.rain_threshold_inches ?? 0.5,
                         paused_until: this.project.paused_until || ''
                     };
+                    // Populate archive ZIP ready state
+                    this.archiveZipReady = !!this.project.archive_zip_path;
+                    // Determine user role for archive controls
+                    if (this.user.is_admin) {
+                        this.userRole = 'platform_admin';
+                    } else {
+                        try {
+                            const mRes = await fetch(`/auth/companies/${companyId}/members`, { credentials: 'same-origin' });
+                            if (mRes.ok) {
+                                const mData = await mRes.json();
+                                const me = (mData.members || []).find(m => m.user_id === this.user.user_id);
+                                this.userRole = me ? me.role : '';
+                            }
+                        } catch (e) { /* non-fatal */ }
+                    }
+                    // Start polling if project is archived but ZIP not ready
+                    if (this.project.status === 'archived' && !this.archiveZipReady) {
+                        this._startArchivePoller(companyId, projectId);
+                    }
                 },
 
                 async loadRunLog(companyId, projectId) {
@@ -803,6 +940,121 @@
                         return this.user.companies[0].id;
                     }
                     return null;
+                },
+
+                // ── Archive actions (IR-7) ──
+
+                async archiveProject() {
+                    this.archiving = true;
+                    this.archiveError = '';
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const projectId = urlParams.get('id');
+                    const companyId = this.user.company_id || this.extractCompanyFromMemberships();
+                    try {
+                        const fd = new FormData();
+                        fd.append('archive_without_not', this.archiveWithoutNot ? 'true' : 'false');
+                        const fileInput = this.$refs.notFileInput;
+                        if (fileInput && fileInput.files.length > 0) {
+                            fd.append('not_file', fileInput.files[0]);
+                        }
+                        const res = await fetch(`/auth/companies/${companyId}/projects/${projectId}/archive`, {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            body: fd,
+                        });
+                        if (!res.ok) {
+                            const err = await res.json();
+                            throw new Error(err.detail || 'Failed to archive project');
+                        }
+                        await this.loadProject(companyId, projectId);
+                    } catch (err) {
+                        console.error('Error archiving project:', err);
+                        this.archiveError = err.message || 'Failed to archive project';
+                    } finally {
+                        this.archiving = false;
+                    }
+                },
+
+                async unarchiveProject() {
+                    this.unarchiving = true;
+                    this.unarchiveError = '';
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const projectId = urlParams.get('id');
+                    const companyId = this.user.company_id || this.extractCompanyFromMemberships();
+                    try {
+                        const res = await fetch(`/auth/companies/${companyId}/projects/${projectId}/unarchive`, {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                        });
+                        if (!res.ok) {
+                            const err = await res.json();
+                            throw new Error(err.detail || 'Failed to unarchive project');
+                        }
+                        this._stopArchivePoller();
+                        await this.loadProject(companyId, projectId);
+                    } catch (err) {
+                        console.error('Error unarchiving project:', err);
+                        this.unarchiveError = err.message || 'Failed to unarchive project';
+                    } finally {
+                        this.unarchiving = false;
+                    }
+                },
+
+                async uploadLateNot() {
+                    this.uploadingNot = true;
+                    this.notUploadError = '';
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const projectId = urlParams.get('id');
+                    const companyId = this.user.company_id || this.extractCompanyFromMemberships();
+                    try {
+                        const fileInput = this.$refs.lateNotFileInput;
+                        if (!fileInput || fileInput.files.length === 0) {
+                            throw new Error('Please select a file');
+                        }
+                        const fd = new FormData();
+                        fd.append('not_file', fileInput.files[0]);
+                        const res = await fetch(`/auth/companies/${companyId}/projects/${projectId}/not`, {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            body: fd,
+                        });
+                        if (!res.ok) {
+                            const err = await res.json();
+                            throw new Error(err.detail || 'Failed to upload NOT document');
+                        }
+                        this.archiveZipReady = false;
+                        await this.loadProject(companyId, projectId);
+                    } catch (err) {
+                        console.error('Error uploading NOT:', err);
+                        this.notUploadError = err.message || 'Upload failed';
+                    } finally {
+                        this.uploadingNot = false;
+                    }
+                },
+
+                _startArchivePoller(companyId, projectId) {
+                    this._stopArchivePoller();
+                    this.archiveZipPoller = setInterval(async () => {
+                        try {
+                            const res = await fetch(`/auth/companies/${companyId}/projects/${projectId}/archive/status`, {
+                                credentials: 'same-origin'
+                            });
+                            if (res.ok) {
+                                const data = await res.json();
+                                if (data.archive_zip_ready) {
+                                    this.archiveZipReady = true;
+                                    this._stopArchivePoller();
+                                }
+                            }
+                        } catch (e) { /* ignore */ }
+                    }, 2000);
+                },
+
+                _stopArchivePoller() {
+                    if (this.archiveZipPoller !== null) {
+                        clearInterval(this.archiveZipPoller);
+                        this.archiveZipPoller = null;
+                    }
                 },
 
                 formatStatus(status) {

@@ -4,13 +4,25 @@ import json
 import logging
 import os
 import re
+import shutil
 import sqlite3
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from web.auth import db
@@ -78,6 +90,10 @@ from web.auth.models import (
     PlatformDashboardResponse,
     ProblemProjectRow,
     CompanyHealthRow,
+    ProjectArchiveRequest,
+    ProjectArchiveResponse,
+    ProjectArchiveStatusResponse,
+    NotUploadResponse,
 )
 from web.log_config import configure_logging
 
@@ -1719,7 +1735,9 @@ def get_mailbox_for_project(
     """Get mailbox entries for a project (public, no auth)."""
     # Find project by project_number (globally unique).
     project = conn.execute(
-        "SELECT id, project_number, project_name, site_address, company_id FROM projects WHERE project_number = ?",
+        "SELECT id, project_number, project_name, site_address, company_id,"
+        " status, archived_at, archive_zip_path, not_document_path"
+        " FROM projects WHERE project_number = ?",
         (project_number,),
     ).fetchone()
 
@@ -1745,12 +1763,17 @@ def get_mailbox_for_project(
     # Get entry count.
     entry_count = db.get_mailbox_entry_count(conn, project["id"])
 
+    is_archived = project["status"] == "archived"
     return MailboxProjectView(
         project_number=project["project_number"],
         project_name=project["project_name"],
         site_address=project["site_address"],
         entry_count=entry_count,
         entries=public_entries,
+        is_archived=is_archived,
+        archived_at=project["archived_at"] if is_archived else None,
+        archive_zip_ready=bool(project["archive_zip_path"]) if is_archived else False,
+        not_on_file=bool(project["not_document_path"]) if is_archived else False,
     )
 
 
@@ -2029,6 +2052,343 @@ def run_due_reports_endpoint(
         failures=result["failures"],
         skipped=result["skipped"],
         duration_ms=duration_ms,
+    )
+
+
+# ── Archive Flow (IR-7) ──────────────────────────────────────────────────
+
+
+def _generate_archive_zip(project_id: str) -> None:
+    """Background task: build a ZIP of all project data and mailbox PDFs.
+
+    Opens its own DB connection because the HTTP response has already been
+    sent by the time this runs.
+    """
+    conn = sqlite3.connect(db.DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    try:
+        project = conn.execute(
+            "SELECT * FROM projects WHERE id = ?", (project_id,)
+        ).fetchone()
+        if not project:
+            log.error("_generate_archive_zip: project not found: %s", project_id)
+            return
+
+        project_dict = dict(project)
+        entries = db.get_mailbox_entries(conn, project_id, sort_order="asc")
+
+        versions = conn.execute(
+            "SELECT * FROM project_template_versions WHERE project_id = ?",
+            (project_id,),
+        ).fetchall()
+
+        data_dir = Path(os.environ.get("TOOLS_DATA_DIR", "web/data"))
+        archive_dir = data_dir / "archives" / project_id
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        zip_path = archive_dir / f"archive_{project_id}.zip"
+
+        import io
+        import zipfile
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+            # Serialise project metadata + report index + template version list.
+            not_path_raw = project_dict.get("not_document_path")
+            manifest = {
+                "schema_version": "1.0",
+                "project": {
+                    k: project_dict[k] for k in project_dict if k != "not_document_path"
+                },
+                "not_on_file": bool(not_path_raw),
+                "not_document_filename": (
+                    Path(not_path_raw).name if not_path_raw else None
+                ),
+                "reports": [
+                    {
+                        "id": e["id"],
+                        "report_date": e["report_date"],
+                        "report_type": e["report_type"],
+                        "generation_mode": e["generation_mode"],
+                        "file_size_bytes": e["file_size_bytes"],
+                        "created_at": e["created_at"],
+                    }
+                    for e in entries
+                ],
+                "template_versions": [dict(v) for v in versions],
+            }
+            zf.writestr(
+                "project-data.json", json.dumps(manifest, indent=2, default=str)
+            )
+
+            # Add PDF reports.
+            for entry in entries:
+                try:
+                    pdf_path = _resolve_mailbox_file_path(entry["file_path"])
+                    zf.write(pdf_path, f"reports/{Path(entry['file_path']).name}")
+                except (HTTPException, FileNotFoundError) as exc:
+                    log.warning(
+                        "Archive ZIP: skipping missing report: entry=%s error=%s",
+                        entry["id"],
+                        exc,
+                    )
+
+            # Add NOT document if present.
+            if not_path_raw:
+                not_file = Path(not_path_raw)
+                if not_file.exists():
+                    zf.write(not_file, f"not/{not_file.name}")
+                else:
+                    log.warning(
+                        "Archive ZIP: NOT file not found on disk: %s", not_path_raw
+                    )
+
+        zip_path.write_bytes(buf.getvalue())
+        db.set_archive_zip_path(conn, project_id, str(zip_path))
+        conn.commit()
+        log.info(
+            "Archive ZIP created: project_id=%s path=%s size=%d",
+            project_id,
+            zip_path,
+            zip_path.stat().st_size,
+        )
+    except Exception as exc:
+        log.error(
+            "_generate_archive_zip failed: project_id=%s error=%s", project_id, exc
+        )
+        raise
+    finally:
+        conn.close()
+
+
+def _require_project_member(
+    company_id: str,
+    project_id: str,
+    user: dict[str, Any],
+    conn: sqlite3.Connection,
+    *,
+    allowed_roles: tuple[str, ...] = ("company_admin", "pm"),
+) -> dict[str, Any]:
+    """Verify project belongs to company and user has required role.
+
+    Returns the project dict on success.  Raises HTTPException otherwise.
+    """
+    if not user.get("is_platform_admin"):
+        membership = db.get_company_user(conn, user["id"], company_id)
+        if not membership:
+            raise HTTPException(status_code=403, detail="Not a member of this company")
+        if membership["role"] not in allowed_roles:
+            raise HTTPException(status_code=403, detail="Insufficient role")
+
+    project = db.get_project_for_company(conn, project_id, company_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+
+@app.post(
+    "/companies/{company_id}/projects/{project_id}/archive",
+    response_model=ProjectArchiveResponse,
+    status_code=202,
+)
+async def archive_project(
+    company_id: str,
+    project_id: str,
+    background_tasks: BackgroundTasks,
+    archive_without_not: bool = Form(False),
+    not_file: UploadFile | None = File(None),
+    user: dict[str, Any] = Depends(get_current_user),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    """Archive a project. pm or company_admin only.
+
+    A Notice of Termination (NOT) file is required unless archive_without_not=True.
+    """
+    project = _require_project_member(company_id, project_id, user, conn)
+
+    if project["status"] == "archived":
+        raise HTTPException(status_code=409, detail="Project is already archived")
+
+    if not archive_without_not and not_file is None:
+        raise HTTPException(
+            status_code=400,
+            detail="A Notice of Termination file is required. Set archive_without_not=true to skip.",
+        )
+
+    not_document_path: str | None = None
+    if not_file is not None:
+        data_dir = Path(os.environ.get("TOOLS_DATA_DIR", "web/data"))
+        not_dir = data_dir / "not" / project_id
+        not_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = Path(not_file.filename or "not_document").name
+        dest = not_dir / safe_name
+        content = await not_file.read()
+        dest.write_bytes(content)
+        not_document_path = str(dest)
+
+    db.archive_project(conn, project_id, user["id"], not_document_path)
+    conn.commit()
+
+    # Fetch the just-written timestamp so we can return it.
+    row = conn.execute(
+        "SELECT archived_at FROM projects WHERE id = ?", (project_id,)
+    ).fetchone()
+    archived_at = row["archived_at"]
+
+    background_tasks.add_task(_generate_archive_zip, project_id)
+    log.info("Archive initiated: project_id=%s by_user=%s", project_id, user["id"])
+
+    return ProjectArchiveResponse(
+        project_id=project_id,
+        archived_at=archived_at,
+        archive_zip_ready=False,
+    )
+
+
+@app.get(
+    "/companies/{company_id}/projects/{project_id}/archive/status",
+    response_model=ProjectArchiveStatusResponse,
+)
+def get_archive_status(
+    company_id: str,
+    project_id: str,
+    user: dict[str, Any] = Depends(get_current_user),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    """Poll whether the archive ZIP is ready. Any company member."""
+    _require_project_member(
+        company_id,
+        project_id,
+        user,
+        conn,
+        allowed_roles=("company_admin", "pm", "viewer"),
+    )
+    row = conn.execute(
+        "SELECT archive_zip_path FROM projects WHERE id = ?", (project_id,)
+    ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Project not found")
+    zip_path = row["archive_zip_path"]
+    return ProjectArchiveStatusResponse(
+        archive_zip_ready=bool(zip_path),
+        archive_zip_path=zip_path,
+    )
+
+
+@app.post(
+    "/companies/{company_id}/projects/{project_id}/unarchive",
+)
+def unarchive_project(
+    company_id: str,
+    project_id: str,
+    user: dict[str, Any] = Depends(get_current_user),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    """Restore a project to active status. company_admin only."""
+    project = _require_project_member(
+        company_id,
+        project_id,
+        user,
+        conn,
+        allowed_roles=("company_admin",),
+    )
+
+    if project["status"] != "archived":
+        raise HTTPException(status_code=400, detail="Project is not archived")
+
+    db.unarchive_project(conn, project_id)
+    conn.commit()
+    log.info("Project unarchived: project_id=%s by_user=%s", project_id, user["id"])
+    return {"project_id": project_id, "status": "active"}
+
+
+@app.post(
+    "/companies/{company_id}/projects/{project_id}/not",
+    response_model=NotUploadResponse,
+)
+async def upload_not_document(
+    company_id: str,
+    project_id: str,
+    background_tasks: BackgroundTasks,
+    not_file: UploadFile = File(...),
+    user: dict[str, Any] = Depends(get_current_user),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    """Upload a Notice of Termination document for an archived project. pm or company_admin."""
+    project = _require_project_member(company_id, project_id, user, conn)
+
+    if project["status"] != "archived":
+        raise HTTPException(
+            status_code=400, detail="Project must be archived to upload a NOT"
+        )
+
+    data_dir = Path(os.environ.get("TOOLS_DATA_DIR", "web/data"))
+    not_dir = data_dir / "not" / project_id
+    not_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = Path(not_file.filename or "not_document").name
+    dest = not_dir / safe_name
+    content = await not_file.read()
+    dest.write_bytes(content)
+
+    db.add_not_document(conn, project_id, user["id"], str(dest))
+    conn.commit()
+
+    row = conn.execute(
+        "SELECT not_uploaded_at FROM projects WHERE id = ?", (project_id,)
+    ).fetchone()
+
+    background_tasks.add_task(_generate_archive_zip, project_id)
+    log.info(
+        "NOT document uploaded: project_id=%s path=%s by_user=%s",
+        project_id,
+        str(dest),
+        user["id"],
+    )
+
+    return NotUploadResponse(
+        project_id=project_id,
+        not_document_path=str(dest),
+        not_uploaded_at=row["not_uploaded_at"],
+    )
+
+
+@app.get("/mailbox/{project_number}/archive/download")
+def download_archive_zip(
+    project_number: str,
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    """Download the complete project archive ZIP (public, no auth).
+
+    Returns 202 + JSON body while the ZIP is still being prepared.
+    """
+    row = conn.execute(
+        "SELECT id, status, archive_zip_path FROM projects WHERE project_number = ?",
+        (project_number,),
+    ).fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if row["status"] != "archived":
+        raise HTTPException(status_code=404, detail="Project is not archived")
+
+    zip_path_str = row["archive_zip_path"]
+    if not zip_path_str:
+        return Response(
+            content=json.dumps(
+                {"detail": "Archive is being prepared. Try again shortly."}
+            ),
+            status_code=202,
+            media_type="application/json",
+        )
+
+    zip_path = Path(zip_path_str)
+    if not zip_path.exists():
+        raise HTTPException(status_code=404, detail="Archive file not found on disk")
+
+    return FileResponse(
+        path=str(zip_path),
+        media_type="application/zip",
+        filename=f"archive_{project_number}.zip",
     )
 
 
