@@ -405,6 +405,7 @@ def me(
         user_id=user["id"],
         display_name=user["display_name"],
         is_admin=bool(user["is_admin"]),
+        is_platform_admin=bool(user.get("is_platform_admin", 0)),
         apps=app_list,
     )
 

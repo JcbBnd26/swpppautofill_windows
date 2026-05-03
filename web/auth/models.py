@@ -47,6 +47,7 @@ class MeResponse(BaseModel):
     user_id: str
     display_name: str
     is_admin: bool
+    is_platform_admin: bool
     apps: list[AppInfo]
 
 
