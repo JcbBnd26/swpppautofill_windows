@@ -154,6 +154,25 @@ class CompanyCreateRequest(BaseModel):
     timezone: str = "America/Chicago"
 
 
+class CompanySettingsView(BaseModel):
+    id: str
+    display_name: str
+    legal_name: str
+    primary_timezone: str
+    address: str | None = None
+    phone: str | None = None
+    website: str | None = None
+
+
+class PatchCompanyRequest(BaseModel):
+    display_name: str | None = None
+    legal_name: str | None = None
+    primary_timezone: str | None = None
+    address: str | None = None
+    phone: str | None = None
+    website: str | None = None
+
+
 # ── Company Signup (IR #2) ────────────────────────────────────────────────
 
 

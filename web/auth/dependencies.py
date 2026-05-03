@@ -62,6 +62,8 @@ def require_company_member(
         (user["id"], company_id),
     ).fetchone()
     if not row:
+        # 403, not 404 — consistent across all /companies/{id}/* routes.
+        # Mixed 403/404 patterns are harder to maintain and easier to probe.
         raise HTTPException(status_code=403, detail="Not a member of this company")
     user["company_role"] = row["role"]
     return user

@@ -29,6 +29,7 @@ from web.auth import db
 from web.auth.dependencies import (
     get_current_user,
     require_admin,
+    require_company_member,
     require_platform_admin,
 )
 from web.auth.models import (
@@ -98,6 +99,8 @@ from web.auth.models import (
     CompanyCreateRequest,
     CompanyAdminView,
     CompanyAdminListResponse,
+    CompanySettingsView,
+    PatchCompanyRequest,
 )
 from web.log_config import configure_logging
 
@@ -1038,6 +1041,48 @@ def claim_company_signup(
         max_age=COOKIE_MAX_AGE,
     )
     return CompanyClaimResponse(success=True, company_id=company_id, redirect="/")
+
+
+# ── Company Settings ─────────────────────────────────────────────────────
+
+
+@app.get("/companies/{company_id}", response_model=CompanySettingsView)
+def get_company_settings(
+    company_id: str,
+    user: dict[str, Any] = Depends(require_company_member),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    row = conn.execute(
+        "SELECT id, display_name, legal_name, primary_timezone, address, phone, website"
+        " FROM companies WHERE id = ? AND is_active = 1",
+        (company_id,),
+    ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Company not found")
+    return CompanySettingsView(**dict(row))
+
+
+@app.patch("/companies/{company_id}", response_model=CompanySettingsView)
+def patch_company_settings(
+    company_id: str,
+    body: PatchCompanyRequest,
+    user: dict[str, Any] = Depends(require_company_member),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    if user["company_role"] != "company_admin" and not user.get("is_platform_admin"):
+        raise HTTPException(status_code=403, detail="Company admin access required")
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if updates:
+        db.update_company(conn, company_id, **updates)
+        conn.commit()
+    row = conn.execute(
+        "SELECT id, display_name, legal_name, primary_timezone, address, phone, website"
+        " FROM companies WHERE id = ? AND is_active = 1",
+        (company_id,),
+    ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Company not found")
+    return CompanySettingsView(**dict(row))
 
 
 # ── Company Admin: Employee Invites ──────────────────────────────────────

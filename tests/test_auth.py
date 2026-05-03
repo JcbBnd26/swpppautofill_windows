@@ -890,6 +890,125 @@ class TestPlatformAdminPatch:
         assert r.status_code == 403
 
 
+# ── Company Settings ─────────────────────────────────────────────────────
+
+
+def _make_company() -> tuple[str, TestClient, TestClient]:
+    """Create a company; return (company_id, company_admin_client, pm_member_client)."""
+    db.init_db()
+    with db.connect() as conn:
+        db.seed_app(conn, "swppp", "SWPPP AutoFill", "Generate ODOT PDFs", "/swppp")
+        cid = db.create_company(
+            conn,
+            legal_name=f"LegalCo {next(_seq)}",
+            display_name=f"Co {next(_seq)}",
+            timezone="America/Chicago",
+        )
+        admin_uid = db.create_user(conn, f"CoAdmin{next(_seq)}")
+        db.add_company_user(conn, admin_uid, cid, role="company_admin")
+        admin_token = db.create_session(conn, admin_uid)
+
+        pm_uid = db.create_user(conn, f"PmUser{next(_seq)}")
+        db.add_company_user(conn, pm_uid, cid, role="pm")
+        pm_token = db.create_session(conn, pm_uid)
+
+    admin_client = TestClient(app, cookies={})
+    admin_client.cookies.set("tools_session", admin_token)
+
+    pm_client = TestClient(app, cookies={})
+    pm_client.cookies.set("tools_session", pm_token)
+
+    return cid, admin_client, pm_client
+
+
+class TestCompanySettings:
+    def test_get_company_returns_settings_for_member(self):
+        """Any company member can GET the company settings."""
+        db.init_db()
+        cid, admin_c, pm_c = _make_company()
+        r = pm_c.get(f"/companies/{cid}")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["id"] == cid
+        assert "display_name" in data
+        assert "legal_name" in data
+        assert "primary_timezone" in data
+
+    def test_patch_company_succeeds_for_company_admin(self):
+        """A company_admin can PATCH display_name."""
+        db.init_db()
+        cid, admin_c, _ = _make_company()
+        r = admin_c.patch(f"/companies/{cid}", json={"display_name": "Updated Name"})
+        assert r.status_code == 200
+        assert r.json()["display_name"] == "Updated Name"
+
+    def test_patch_company_rejected_for_regular_member(self):
+        """A pm-role member cannot PATCH company settings."""
+        db.init_db()
+        cid, _, pm_c = _make_company()
+        r = pm_c.patch(f"/companies/{cid}", json={"display_name": "Hacked"})
+        assert r.status_code == 403
+
+    def test_patch_company_platform_admin_bypass(self):
+        """A platform admin can PATCH any company even without a company_users row."""
+        db.init_db()
+        cid, _, _ = _make_company()
+        with db.connect() as conn:
+            pa_uid = db.create_user(conn, f"PA{next(_seq)}", is_admin=True)
+            conn.execute("UPDATE users SET is_platform_admin=1 WHERE id=?", (pa_uid,))
+            conn.commit()
+            pa_token = db.create_session(conn, pa_uid)
+        pa_c = TestClient(app, cookies={})
+        pa_c.cookies.set("tools_session", pa_token)
+
+        r = pa_c.patch(f"/companies/{cid}", json={"phone": "555-0100"})
+        assert r.status_code == 200
+        assert r.json()["phone"] == "555-0100"
+
+    def test_patch_does_not_expose_plan_fields(self):
+        """plan, seat_limit, is_active are not accepted via the PATCH body."""
+        db.init_db()
+        cid, admin_c, _ = _make_company()
+        # FastAPI will ignore unknown fields; the important thing is no 422 and
+        # is_active stays 1 (company remains active after the call).
+        r = admin_c.patch(
+            f"/companies/{cid}",
+            json={"display_name": "Safe", "plan": "enterprise", "seat_limit": 999},
+        )
+        assert r.status_code == 200
+        with db.connect() as conn:
+            row = conn.execute(
+                "SELECT plan, seat_limit, is_active FROM companies WHERE id=?", (cid,)
+            ).fetchone()
+        assert row["plan"] is None
+        assert row["seat_limit"] is None
+        assert row["is_active"] == 1
+
+    def test_patch_company_non_member_gets_403(self):
+        """A user with no membership in a company gets 403.
+
+        Consistent with all other /companies/{id}/* endpoints in the codebase.
+        """
+        db.init_db()
+        cid, _, _ = _make_company()
+        # Create a user in a completely different company
+        with db.connect() as conn:
+            other_uid = db.create_user(conn, f"Other{next(_seq)}")
+            other_cid = db.create_company(
+                conn,
+                legal_name=f"OtherLegal {next(_seq)}",
+                display_name=f"OtherCo {next(_seq)}",
+                timezone="America/Chicago",
+            )
+            db.add_company_user(conn, other_uid, other_cid, role="company_admin")
+            other_token = db.create_session(conn, other_uid)
+        other_c = TestClient(app, cookies={})
+        other_c.cookies.set("tools_session", other_token)
+
+        r = other_c.patch(f"/companies/{cid}", json={"display_name": "Intruder"})
+        assert r.status_code == 403
+
+
 # ── Phase 6: Server-side auth gate ──────────────────────────────────────
 
 

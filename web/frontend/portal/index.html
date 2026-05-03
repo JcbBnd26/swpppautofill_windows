@@ -51,9 +51,20 @@
             <p x-show="!loading && user.apps.length === 0" class="text-center text-gray-400 mt-10">No apps available.
                 Contact an admin for access.</p>
 
+            <!-- Company Settings link (company admins only) -->
+            <div x-show="showSettings && user.is_admin" x-transition
+                class="mt-10 max-w-sm mx-auto bg-white rounded-xl shadow-sm border border-gray-200 p-4 flex items-center justify-between">
+                <div>
+                    <p class="text-sm font-medium text-gray-800">Company Settings</p>
+                    <p class="text-xs text-gray-500">Edit company name, timezone, and contact info</p>
+                </div>
+                <a :href="'/portal/company-settings.html' + (companyId ? '?company=' + companyId : '')"
+                    class="text-sm text-blue-600 hover:underline">Open →</a>
+            </div>
+
             <!-- Set Password -->
             <div x-show="showSettings" x-transition
-                class="mt-10 max-w-sm mx-auto bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                class="mt-4 max-w-sm mx-auto bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                 <h3 class="text-base font-semibold text-gray-800 mb-1">Password Login</h3>
                 <p class="text-sm text-gray-500 mb-4">Set a password so you can log in as
                     <strong x-text="user.display_name"></strong> instead of using an access code.
@@ -84,6 +95,7 @@
             return {
                 loading: true,
                 user: { display_name: '', is_admin: false, apps: [] },
+                companyId: '',
                 showSettings: false,
                 newPassword: '',
                 currentPassword: '',
@@ -97,6 +109,12 @@
                         const res = await fetch('/auth/me', { credentials: 'same-origin' });
                         if (!res.ok) { window.location.href = '/auth/login'; return; }
                         this.user = await res.json();
+                        const urlCompany = new URLSearchParams(window.location.search).get('company');
+                        this.companyId = urlCompany
+                            || this.user.company_id
+                            || (this.user.companies && this.user.companies.length > 0
+                                ? this.user.companies[0].id
+                                : '');
                     } catch {
                         window.location.href = '/auth/login';
                     } finally {

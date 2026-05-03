@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Company Settings | Company Tools</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+</head>
+
+<body class="bg-gray-100 min-h-screen">
+
+    <div x-data="companySettingsApp()" x-init="init()">
+
+        <!-- Header -->
+        <header class="bg-white shadow-sm">
+            <div class="max-w-3xl mx-auto px-6 py-4 flex items-center justify-between">
+                <div class="flex items-center gap-4">
+                    <a :href="companyId ? `/portal/dashboard.html?company=${companyId}` : '/portal/dashboard.html'"
+                        class="text-blue-600 hover:underline text-sm">← Dashboard</a>
+                    <h1 class="text-lg font-semibold text-gray-800">Company Settings</h1>
+                </div>
+                <div class="flex items-center gap-4 text-sm text-gray-600">
+                    <span x-text="user.display_name"></span>
+                    <button @click="logout()" class="text-red-600 hover:underline">Logout</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Loading -->
+        <div x-show="loading" class="text-center mt-20 text-gray-500">Loading…</div>
+
+        <!-- Error -->
+        <div x-show="error && !loading" class="max-w-3xl mx-auto px-6 py-10">
+            <div class="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700" x-text="error"></div>
+        </div>
+
+        <!-- Settings Form -->
+        <main x-show="!loading && !error" class="max-w-3xl mx-auto px-6 py-10">
+
+            <!-- Toast -->
+            <div x-show="toast" x-transition class="mb-6 rounded-lg px-4 py-3 text-sm font-medium"
+                :class="toastType === 'success' ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-red-50 border border-red-200 text-red-700'"
+                x-text="toast"></div>
+
+            <div class="bg-white rounded-xl border border-gray-200 p-8">
+                <h2 class="text-base font-semibold text-gray-800 mb-6">Company Profile</h2>
+
+                <form @submit.prevent="save()" class="space-y-5">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                        <!-- Display Name -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Display Name</label>
+                            <input type="text" x-model="form.display_name"
+                                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                                placeholder="Short name shown in the UI" />
+                        </div>
+                        <!-- Legal Name -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Legal Name</label>
+                            <input type="text" x-model="form.legal_name"
+                                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                                placeholder="Full legal company name" />
+                        </div>
+                        <!-- Timezone -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Timezone</label>
+                            <input type="text" x-model="form.primary_timezone"
+                                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                                placeholder="e.g. America/Chicago" />
+                        </div>
+                        <!-- Phone -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                            <input type="text" x-model="form.phone"
+                                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                                placeholder="Office phone number" />
+                        </div>
+                        <!-- Website -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Website</label>
+                            <input type="url" x-model="form.website"
+                                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                                placeholder="https://example.com" />
+                        </div>
+                        <!-- Address -->
+                        <div class="sm:col-span-2">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Address</label>
+                            <input type="text" x-model="form.address"
+                                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                                placeholder="Street address" />
+                        </div>
+                    </div>
+
+                    <div class="flex justify-end pt-2">
+                        <button type="submit" :disabled="saving"
+                            class="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-6 py-2 rounded-lg text-sm font-medium transition">
+                            <span x-show="!saving">Save Changes</span>
+                            <span x-show="saving">Saving…</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        function companySettingsApp() {
+            return {
+                loading: true,
+                error: '',
+                saving: false,
+                toast: '',
+                toastType: 'success',
+                user: { display_name: '', is_admin: false, is_platform_admin: false },
+                companyId: '',
+                form: {
+                    display_name: '',
+                    legal_name: '',
+                    primary_timezone: '',
+                    address: '',
+                    phone: '',
+                    website: '',
+                },
+
+                async init() {
+                    try {
+                        const meRes = await fetch('/auth/me', { credentials: 'same-origin' });
+                        if (!meRes.ok) {
+                            window.location.href = '/auth/login';
+                            return;
+                        }
+                        this.user = await meRes.json();
+
+                        const urlParams = new URLSearchParams(window.location.search);
+                        const urlCompany = urlParams.get('company');
+                        this.companyId = urlCompany
+                            || this.user.company_id
+                            || (this.user.companies && this.user.companies.length > 0
+                                ? this.user.companies[0].id
+                                : '');
+
+                        if (!this.companyId) {
+                            this.error = 'No company found. Please contact your administrator.';
+                            this.loading = false;
+                            return;
+                        }
+
+                        // Only company_admin or platform_admin may access this page
+                        const role = this.user.companies
+                            ? (this.user.companies.find(c => c.id === this.companyId) || {}).role
+                            : null;
+                        if (!this.user.is_platform_admin && role !== 'company_admin') {
+                            window.location.href = '/portal/dashboard.html'
+                                + (this.companyId ? `?company=${this.companyId}` : '');
+                            return;
+                        }
+
+                        const res = await fetch(`/auth/companies/${this.companyId}`, { credentials: 'same-origin' });
+                        if (!res.ok) {
+                            throw new Error(`Failed to load company settings: ${res.status}`);
+                        }
+                        const data = await res.json();
+                        this.form.display_name = data.display_name || '';
+                        this.form.legal_name = data.legal_name || '';
+                        this.form.primary_timezone = data.primary_timezone || '';
+                        this.form.address = data.address || '';
+                        this.form.phone = data.phone || '';
+                        this.form.website = data.website || '';
+                    } catch (err) {
+                        console.error('Error loading company settings:', err);
+                        this.error = err.message || 'Failed to load settings';
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                async save() {
+                    this.saving = true;
+                    this.toast = '';
+                    try {
+                        const payload = {};
+                        for (const [k, v] of Object.entries(this.form)) {
+                            if (v !== '') payload[k] = v;
+                        }
+                        const res = await fetch(`/auth/companies/${this.companyId}`, {
+                            method: 'PATCH',
+                            credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload),
+                        });
+                        if (!res.ok) {
+                            const err = await res.json().catch(() => ({}));
+                            throw new Error(err.detail || `Save failed: ${res.status}`);
+                        }
+                        const data = await res.json();
+                        this.form.display_name = data.display_name || '';
+                        this.form.legal_name = data.legal_name || '';
+                        this.form.primary_timezone = data.primary_timezone || '';
+                        this.form.address = data.address || '';
+                        this.form.phone = data.phone || '';
+                        this.form.website = data.website || '';
+                        this.toastType = 'success';
+                        this.toast = 'Settings saved.';
+                    } catch (err) {
+                        console.error('Save error:', err);
+                        this.toastType = 'error';
+                        this.toast = err.message || 'Failed to save settings';
+                    } finally {
+                        this.saving = false;
+                        setTimeout(() => { this.toast = ''; }, 4000);
+                    }
+                },
+
+                logout() {
+                    fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' })
+                        .finally(() => { window.location.href = '/auth/login'; });
+                },
+            };
+        }
+    </script>
+
+</body>
+
+</html>
