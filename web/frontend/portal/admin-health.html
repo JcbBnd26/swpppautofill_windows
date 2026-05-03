@@ -71,47 +71,48 @@
                 </div>
 
                 <div class="overflow-x-auto">
-                <table x-show="(dashboard.problem_projects ?? []).length > 0" class="w-full text-sm">
-                    <thead>
-                        <tr class="text-left text-xs text-gray-500 border-b">
-                            <th class="py-2 pr-4">Company</th>
-                            <th class="pr-4">Project #</th>
-                            <th class="pr-4">Name</th>
-                            <th class="pr-4">Health</th>
-                            <th class="pr-4">Reason</th>
-                            <th class="pr-4">Last Success</th>
-                            <th>Failures (7d)</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <template x-for="p in (dashboard.problem_projects ?? [])" :key="p.project_id">
-                            <tr class="border-b last:border-0"
-                                :class="p.health_flag === 'red' ? 'border-l-4 border-l-red-400 pl-2' : 'border-l-4 border-l-yellow-400 pl-2'">
-                                <td class="py-2 pr-4 text-gray-600" x-text="p.company_name"></td>
-                                <td class="pr-4 font-mono text-xs" x-text="p.project_number"></td>
-                                <td class="pr-4 font-medium">
-                                    <a :href="'/portal/project-detail.html?id=' + p.project_id"
-                                        class="text-blue-600 hover:underline" x-text="p.project_name"></a>
-                                </td>
-                                <td class="pr-4">
-                                    <span
-                                        class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-                                        :class="p.health_flag === 'red'
+                    <table x-show="(dashboard.problem_projects ?? []).length > 0" class="w-full text-sm">
+                        <thead>
+                            <tr class="text-left text-xs text-gray-500 border-b">
+                                <th class="py-2 pr-4">Company</th>
+                                <th class="pr-4">Project #</th>
+                                <th class="pr-4">Name</th>
+                                <th class="pr-4">Health</th>
+                                <th class="pr-4">Reason</th>
+                                <th class="pr-4">Last Success</th>
+                                <th>Failures (7d)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="p in (dashboard.problem_projects ?? [])" :key="p.project_id">
+                                <tr class="border-b last:border-0"
+                                    :class="p.health_flag === 'red' ? 'border-l-4 border-l-red-400 pl-2' : 'border-l-4 border-l-yellow-400 pl-2'">
+                                    <td class="py-2 pr-4 text-gray-600" x-text="p.company_name"></td>
+                                    <td class="pr-4 font-mono text-xs" x-text="p.project_number"></td>
+                                    <td class="pr-4 font-medium">
+                                        <a :href="'/portal/project-detail.html?id=' + p.project_id"
+                                            class="text-blue-600 hover:underline" x-text="p.project_name"></a>
+                                    </td>
+                                    <td class="pr-4">
+                                        <span
+                                            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+                                            :class="p.health_flag === 'red'
                                             ? 'bg-red-100 text-red-700'
                                             : 'bg-yellow-100 text-yellow-700'">
-                                        <span x-text="p.health_flag === 'red' ? '● Red' : '● Yellow'"></span>
-                                    </span>
-                                </td>
-                                <td class="pr-4 text-gray-600" x-text="p.status_reason"></td>
-                                <td class="pr-4 text-gray-500 text-xs"
-                                    x-text="p.last_successful_run_at ? timeAgo(p.last_successful_run_at) : '—'"></td>
-                                <td class="font-medium"
-                                    :class="p.failure_count_7d > 0 ? 'text-red-600' : 'text-gray-400'"
-                                    x-text="p.failure_count_7d"></td>
-                            </tr>
-                        </template>
-                    </tbody>
-                </table>
+                                            <span x-text="p.health_flag === 'red' ? '● Red' : '● Yellow'"></span>
+                                        </span>
+                                    </td>
+                                    <td class="pr-4 text-gray-600" x-text="p.status_reason"></td>
+                                    <td class="pr-4 text-gray-500 text-xs"
+                                        x-text="p.last_successful_run_at ? timeAgo(p.last_successful_run_at) : '—'">
+                                    </td>
+                                    <td class="font-medium"
+                                        :class="p.failure_count_7d > 0 ? 'text-red-600' : 'text-gray-400'"
+                                        x-text="p.failure_count_7d"></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
                 </div>
             </section>
 
@@ -123,36 +124,37 @@
                     found.</div>
 
                 <div class="overflow-x-auto">
-                <table x-show="(dashboard.company_rollup ?? []).length > 0" class="w-full text-sm">
-                    <thead>
-                        <tr class="text-left text-xs text-gray-500 border-b">
-                            <th class="py-2 pr-4">Company</th>
-                            <th class="pr-4">Projects</th>
-                            <th class="pr-4">Active</th>
-                            <th class="pr-4">Failing</th>
-                            <th class="pr-4">Paused</th>
-                            <th class="pr-4">Incomplete</th>
-                            <th class="pr-4">Last Activity</th>
-                            <th>Admin</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <template x-for="c in (dashboard.company_rollup ?? [])" :key="c.id">
-                            <tr class="border-b last:border-0" :class="c.failing > 0 ? 'bg-red-50' : ''">
-                                <td class="py-2 pr-4 font-medium text-gray-800" x-text="c.display_name"></td>
-                                <td class="pr-4 text-gray-600" x-text="c.total_projects"></td>
-                                <td class="pr-4 text-green-600 font-medium" x-text="c.active"></td>
-                                <td class="pr-4 font-medium" :class="c.failing > 0 ? 'text-red-600' : 'text-gray-400'"
-                                    x-text="c.failing"></td>
-                                <td class="pr-4 text-yellow-600" x-text="c.paused"></td>
-                                <td class="pr-4 text-yellow-600" x-text="c.setup_incomplete"></td>
-                                <td class="pr-4 text-gray-500 text-xs"
-                                    x-text="c.last_activity ? timeAgo(c.last_activity) : '—'"></td>
-                                <td class="text-gray-500 text-xs" x-text="c.admin_name ?? '—'"></td>
+                    <table x-show="(dashboard.company_rollup ?? []).length > 0" class="w-full text-sm">
+                        <thead>
+                            <tr class="text-left text-xs text-gray-500 border-b">
+                                <th class="py-2 pr-4">Company</th>
+                                <th class="pr-4">Projects</th>
+                                <th class="pr-4">Active</th>
+                                <th class="pr-4">Failing</th>
+                                <th class="pr-4">Paused</th>
+                                <th class="pr-4">Incomplete</th>
+                                <th class="pr-4">Last Activity</th>
+                                <th>Admin</th>
                             </tr>
-                        </template>
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            <template x-for="c in (dashboard.company_rollup ?? [])" :key="c.id">
+                                <tr class="border-b last:border-0" :class="c.failing > 0 ? 'bg-red-50' : ''">
+                                    <td class="py-2 pr-4 font-medium text-gray-800" x-text="c.display_name"></td>
+                                    <td class="pr-4 text-gray-600" x-text="c.total_projects"></td>
+                                    <td class="pr-4 text-green-600 font-medium" x-text="c.active"></td>
+                                    <td class="pr-4 font-medium"
+                                        :class="c.failing > 0 ? 'text-red-600' : 'text-gray-400'" x-text="c.failing">
+                                    </td>
+                                    <td class="pr-4 text-yellow-600" x-text="c.paused"></td>
+                                    <td class="pr-4 text-yellow-600" x-text="c.setup_incomplete"></td>
+                                    <td class="pr-4 text-gray-500 text-xs"
+                                        x-text="c.last_activity ? timeAgo(c.last_activity) : '—'"></td>
+                                    <td class="text-gray-500 text-xs" x-text="c.admin_name ?? '—'"></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
                 </div>
             </section>
 
