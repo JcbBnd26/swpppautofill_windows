@@ -43,12 +43,19 @@ class AppInfo(BaseModel):
     route_prefix: str
 
 
+class CompanyRef(BaseModel):
+    id: str
+    display_name: str
+    role: str
+
+
 class MeResponse(BaseModel):
     user_id: str
     display_name: str
     is_admin: bool
     is_platform_admin: bool
     apps: list[AppInfo]
+    companies: list[CompanyRef] = []
 
 
 # ── Admin: Users ─────────────────────────────────────────────────────────
@@ -123,6 +130,12 @@ class CompanyUserInfo(BaseModel):
 
 class CompanyListResponse(BaseModel):
     companies: list[CompanyInfo]
+
+
+class CompanyCreateRequest(BaseModel):
+    legal_name: str
+    display_name: str
+    timezone: str = "America/Chicago"
 
 
 # ── Company Signup (IR #2) ────────────────────────────────────────────────

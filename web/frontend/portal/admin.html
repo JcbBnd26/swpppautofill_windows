@@ -132,6 +132,39 @@
                         </div>
                     </div>
                 </section>
+
+                <!-- ── Section B0b: Create Company Directly (platform admin only) ── -->
+                <section x-show="user.is_platform_admin"
+                    class="bg-white rounded-xl shadow-sm border border-green-200 p-6">
+                    <h2 class="text-lg font-semibold text-green-800 mb-1">Create Company Directly</h2>
+                    <p class="text-xs text-gray-500 mb-4">Creates a company immediately and adds you as
+                        company_admin. Use this to set up your own company for testing or internal projects.</p>
+                    <div class="flex flex-col sm:flex-row sm:flex-wrap gap-4 items-end">
+                        <div class="w-full sm:flex-1 sm:min-w-[200px]">
+                            <label class="block text-sm text-gray-600 mb-1">Legal Name</label>
+                            <input type="text" x-model="directCompany.legal_name"
+                                placeholder="e.g. Apex Contractors LLC"
+                                class="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400" />
+                        </div>
+                        <div class="w-full sm:flex-1">
+                            <label class="block text-sm text-gray-600 mb-1">Display Name</label>
+                            <input type="text" x-model="directCompany.display_name"
+                                placeholder="e.g. Apex Contractors"
+                                class="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400" />
+                        </div>
+                        <button @click="createCompanyDirect()"
+                            :disabled="!directCompany.legal_name.trim() || !directCompany.display_name.trim() || directCompany.submitting"
+                            class="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg transition disabled:opacity-50">
+                            <span x-show="!directCompany.submitting">Create Company</span>
+                            <span x-show="directCompany.submitting">Creating…</span>
+                        </button>
+                    </div>
+                    <div x-show="directCompany.successMsg" class="mt-3 text-sm text-green-700 font-medium"
+                        x-text="directCompany.successMsg"></div>
+                    <div x-show="directCompany.errorMsg" class="mt-3 text-sm text-red-600"
+                        x-text="directCompany.errorMsg"></div>
+                </section>
+
                 <div class="flex flex-col sm:flex-row gap-4 items-end">
                     <div class="w-full sm:flex-1">
                         <label class="block text-sm text-gray-600 mb-1">Name</label>
@@ -318,6 +351,7 @@
                 companySignup: { name: '', email: '' },
                 companySignupLink: '',
                 allCompanySignupInvites: [],
+                directCompany: { legal_name: '', display_name: '', submitting: false, successMsg: '', errorMsg: '' },
                 invite: { name: '', apps: [] },
                 generatedCode: '',
                 generatedLink: '',
@@ -373,6 +407,25 @@
                     if (this.user.is_platform_admin) {
                         const csi = await this.api('/admin/company-signup-invites').catch(() => ({ invites: [] }));
                         this.allCompanySignupInvites = csi.invites;
+                    }
+                },
+
+                async createCompanyDirect() {
+                    this.directCompany.submitting = true;
+                    this.directCompany.successMsg = '';
+                    this.directCompany.errorMsg = '';
+                    try {
+                        const data = await this.api('/admin/companies', 'POST', {
+                            legal_name: this.directCompany.legal_name.trim(),
+                            display_name: this.directCompany.display_name.trim(),
+                        });
+                        this.directCompany.successMsg = `Company "${data.display_name}" created. Go to Projects to add a project.`;
+                        this.directCompany.legal_name = '';
+                        this.directCompany.display_name = '';
+                    } catch (err) {
+                        this.directCompany.errorMsg = err.message || 'Failed to create company.';
+                    } finally {
+                        this.directCompany.submitting = false;
                     }
                 },
 

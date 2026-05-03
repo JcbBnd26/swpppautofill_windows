@@ -94,6 +94,8 @@ from web.auth.models import (
     ProjectArchiveResponse,
     ProjectArchiveStatusResponse,
     NotUploadResponse,
+    CompanyRef,
+    CompanyCreateRequest,
 )
 from web.log_config import configure_logging
 
@@ -401,12 +403,18 @@ def me(
                     route_prefix=info["route_prefix"],
                 )
             )
+    user_companies = db.get_user_companies(conn, user["id"])
+    company_list = [
+        CompanyRef(id=c["id"], display_name=c["display_name"], role=c["role"])
+        for c in user_companies
+    ]
     return MeResponse(
         user_id=user["id"],
         display_name=user["display_name"],
         is_admin=bool(user["is_admin"]),
         is_platform_admin=bool(user.get("is_platform_admin", 0)),
         apps=app_list,
+        companies=company_list,
     )
 
 
@@ -850,6 +858,34 @@ def create_company_signup_invite(
         admin["id"],
     )
     return CompanySignupInviteResponse(token=token, link=link)
+
+
+@app.post("/admin/companies", status_code=201)
+def create_company_direct(
+    body: CompanyCreateRequest,
+    admin: dict[str, Any] = Depends(require_platform_admin),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    """Platform admin directly creates a company and is added as company_admin."""
+    legal_name = body.legal_name.strip()
+    display_name = body.display_name.strip()
+    if not legal_name:
+        raise HTTPException(status_code=400, detail="legal_name is required")
+    if not display_name:
+        raise HTTPException(status_code=400, detail="display_name is required")
+    company_id = db.create_company(
+        conn,
+        legal_name=legal_name,
+        display_name=display_name,
+        timezone=body.timezone,
+        created_by=admin["id"],
+    )
+    db.add_company_user(conn, admin["id"], company_id, role="company_admin")
+    log.info(
+        "Company created directly by platform admin: id=%s name=%s admin=%s",
+        company_id, legal_name, admin["id"],
+    )
+    return {"id": company_id, "display_name": display_name}
 
 
 @app.get("/admin/company-signup-invites")
