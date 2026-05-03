@@ -32,15 +32,15 @@
             <!-- ── Section A: Generate Invite ──────────────────────── -->
             <section class="bg-white rounded-xl shadow-sm border p-6">
                 <h2 class="text-lg font-semibold text-gray-800 mb-4">Generate Invite Code</h2>
-                <div class="flex flex-wrap gap-4 items-end">
-                    <div class="flex-1 min-w-[200px]">
+                <div class="flex flex-col sm:flex-row gap-4 items-end">
+                    <div class="w-full sm:flex-1">
                         <label class="block text-sm text-gray-600 mb-1">Name</label>
                         <input type="text" x-model="invite.name" placeholder="e.g. Mike R."
                             class="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                     </div>
                     <div>
                         <label class="block text-sm text-gray-600 mb-1">Apps</label>
-                        <div class="flex gap-3">
+                        <div class="flex flex-wrap gap-3">
                             <template x-for="a in allApps" :key="a.id">
                                 <label class="flex items-center gap-1 text-sm">
                                     <input type="checkbox" :value="a.id" x-model="invite.apps" />
@@ -80,13 +80,13 @@
                     <h2 class="text-lg font-semibold text-indigo-800 mb-1">Onboard New Company</h2>
                     <p class="text-xs text-gray-500 mb-4">Creates a 30-day signup link. The recipient fills their
                         company profile and sets their own password.</p>
-                    <div class="flex flex-wrap gap-4 items-end">
-                        <div class="flex-1 min-w-[200px]">
+                    <div class="flex flex-col sm:flex-row sm:flex-wrap gap-4 items-end">
+                        <div class="w-full sm:flex-1 sm:min-w-[200px]">
                             <label class="block text-sm text-gray-600 mb-1">Proposed Company Name</label>
                             <input type="text" x-model="companySignup.name" placeholder="e.g. Apex Contractors LLC"
                                 class="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400" />
                         </div>
-                        <div class="flex-1 min-w-[200px]">
+                        <div class="w-full sm:flex-1">
                             <label class="block text-sm text-gray-600 mb-1">Admin Email (for reference)</label>
                             <input type="email" x-model="companySignup.email" placeholder="admin@example.com"
                                 class="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400" />
@@ -108,6 +108,7 @@
                     <!-- Pending company signup invites -->
                     <div x-show="pendingCompanyInvites.length > 0" class="mt-6">
                         <p class="text-sm font-medium text-gray-700 mb-2">Pending Company Signups</p>
+                        <div class="overflow-x-auto">
                         <table class="w-full text-xs">
                             <thead>
                                 <tr class="text-left text-gray-400 border-b">
@@ -128,17 +129,18 @@
                                 </template>
                             </tbody>
                         </table>
+                        </div>
                     </div>
                 </section>
-                <div class="flex flex-wrap gap-4 items-end">
-                    <div class="flex-1 min-w-[200px]">
+                <div class="flex flex-col sm:flex-row gap-4 items-end">
+                    <div class="w-full sm:flex-1">
                         <label class="block text-sm text-gray-600 mb-1">Name</label>
                         <input type="text" x-model="newUser.name" placeholder="e.g. Jane D."
                             class="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                     </div>
                     <div>
                         <label class="block text-sm text-gray-600 mb-1">Apps</label>
-                        <div class="flex gap-3">
+                        <div class="flex flex-wrap gap-3">
                             <template x-for="a in allApps" :key="a.id">
                                 <label class="flex items-center gap-1 text-sm">
                                     <input type="checkbox" :value="a.id" x-model="newUser.apps" />
@@ -183,6 +185,7 @@
             <section class="bg-white rounded-xl shadow-sm border p-6">
                 <h2 class="text-lg font-semibold text-gray-800 mb-4">Pending Invites</h2>
                 <div x-show="pendingInvites.length === 0" class="text-gray-400 text-sm">None</div>
+                <div class="overflow-x-auto">
                 <table x-show="pendingInvites.length > 0" class="w-full text-sm">
                     <thead>
                         <tr class="text-left text-gray-500 border-b">
@@ -208,11 +211,13 @@
                         </template>
                     </tbody>
                 </table>
+                </div>
             </section>
 
             <!-- ── Section C: Active Users ─────────────────────────── -->
             <section class="bg-white rounded-xl shadow-sm border p-6">
                 <h2 class="text-lg font-semibold text-gray-800 mb-4">Users</h2>
+                <div class="overflow-x-auto">
                 <table class="w-full text-sm">
                     <thead>
                         <tr class="text-left text-gray-500 border-b">
@@ -254,6 +259,7 @@
                         </template>
                     </tbody>
                 </table>
+                </div>
             </section>
 
             <!-- ── Modal: Manage Apps ──────────────────────────────── -->
