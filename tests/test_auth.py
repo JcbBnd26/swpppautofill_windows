@@ -830,7 +830,9 @@ class TestPlatformAdminPatch:
         users = r.json()["users"]
         assert len(users) >= 1
         for u in users:
-            assert "is_platform_admin" in u, f"Missing is_platform_admin on user {u['id']}"
+            assert (
+                "is_platform_admin" in u
+            ), f"Missing is_platform_admin on user {u['id']}"
             assert isinstance(u["is_platform_admin"], bool)
 
     def test_platform_admin_can_promote_another_user(self):
@@ -884,9 +886,7 @@ class TestPlatformAdminPatch:
         c.post("/auth/claim", json={"code": code})
         target_id = c.get("/auth/me").json()["user_id"]
 
-        r = non_pa.patch(
-            f"/admin/users/{target_id}", json={"is_platform_admin": True}
-        )
+        r = non_pa.patch(f"/admin/users/{target_id}", json={"is_platform_admin": True})
         assert r.status_code == 403
 
 
