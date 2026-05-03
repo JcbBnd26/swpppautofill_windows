@@ -804,6 +804,92 @@ class TestAdminUsersExtended:
         assert r.status_code == 200
 
 
+# ── Platform admin PATCH tests ───────────────────────────────────────────
+
+
+def _non_pa_admin_client() -> TestClient:
+    """Create an is_admin=True, is_platform_admin=False user and return a client."""
+    with db.connect() as conn:
+        db.seed_app(conn, "swppp", "SWPPP AutoFill", "Generate ODOT PDFs", "/swppp")
+        uid = db.create_user(conn, f"NonPAAdmin{next(_seq)}", is_admin=True)
+        conn.execute("UPDATE users SET is_platform_admin=0 WHERE id=?", (uid,))
+        conn.commit()
+        token = db.create_session(conn, uid)
+    c = TestClient(app, cookies={})
+    c.cookies.set("tools_session", token)
+    return c
+
+
+class TestPlatformAdminPatch:
+    def test_get_users_includes_is_platform_admin_field(self):
+        """GET /admin/users must include is_platform_admin on every UserInfo."""
+        db.init_db()
+        admin = _admin_client()
+        r = admin.get("/admin/users")
+        assert r.status_code == 200
+        users = r.json()["users"]
+        assert len(users) >= 1
+        for u in users:
+            assert "is_platform_admin" in u, f"Missing is_platform_admin on user {u['id']}"
+            assert isinstance(u["is_platform_admin"], bool)
+
+    def test_platform_admin_can_promote_another_user(self):
+        """A PA can set is_platform_admin=True on another user."""
+        db.init_db()
+        admin = _admin_client()
+        code = _make_invite(admin, f"PromoteTarget{next(_seq)}")
+        c = TestClient(app, cookies={})
+        c.post("/auth/claim", json={"code": code})
+        target_id = c.get("/auth/me").json()["user_id"]
+
+        r = admin.patch(f"/admin/users/{target_id}", json={"is_platform_admin": True})
+        assert r.status_code == 200
+
+        # Confirm the flag is reflected in the user list
+        users = {u["id"]: u for u in admin.get("/admin/users").json()["users"]}
+        assert users[target_id]["is_platform_admin"] is True
+
+    def test_platform_admin_can_demote_another_user(self):
+        """A PA can set is_platform_admin=False on another user (not themselves)."""
+        db.init_db()
+        admin = _admin_client()
+        with db.connect() as conn:
+            uid2 = db.create_user(conn, f"PATarget{next(_seq)}", is_admin=True)
+            conn.execute("UPDATE users SET is_platform_admin=1 WHERE id=?", (uid2,))
+            conn.commit()
+
+        r = admin.patch(f"/admin/users/{uid2}", json={"is_platform_admin": False})
+        assert r.status_code == 200
+
+        users = {u["id"]: u for u in admin.get("/admin/users").json()["users"]}
+        assert users[uid2]["is_platform_admin"] is False
+
+    def test_self_demotion_is_rejected(self):
+        """A PA cannot remove their own platform_admin flag — guard must fire."""
+        db.init_db()
+        admin = _admin_client()
+        my_id = admin.get("/auth/me").json()["user_id"]
+
+        r = admin.patch(f"/admin/users/{my_id}", json={"is_platform_admin": False})
+        assert r.status_code == 400
+        assert "demote yourself" in r.json()["detail"].lower()
+
+    def test_non_platform_admin_cannot_change_pa_flag(self):
+        """An is_admin=True user without is_platform_admin cannot escalate via PATCH."""
+        db.init_db()
+        non_pa = _non_pa_admin_client()
+        admin = _admin_client()
+        code = _make_invite(admin, f"EscalationTarget{next(_seq)}")
+        c = TestClient(app, cookies={})
+        c.post("/auth/claim", json={"code": code})
+        target_id = c.get("/auth/me").json()["user_id"]
+
+        r = non_pa.patch(
+            f"/admin/users/{target_id}", json={"is_platform_admin": True}
+        )
+        assert r.status_code == 403
+
+
 # ── Phase 6: Server-side auth gate ──────────────────────────────────────
 
 
