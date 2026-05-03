@@ -96,6 +96,8 @@ from web.auth.models import (
     NotUploadResponse,
     CompanyRef,
     CompanyCreateRequest,
+    CompanyAdminView,
+    CompanyAdminListResponse,
 )
 from web.log_config import configure_logging
 
@@ -434,6 +436,7 @@ def list_users(
                 display_name=u["display_name"],
                 is_active=bool(u["is_active"]),
                 is_admin=bool(u["is_admin"]),
+                is_platform_admin=bool(u.get("is_platform_admin", 0)),
                 created_at=u["created_at"],
                 last_seen_at=u["last_seen_at"],
                 apps=u["apps"],
@@ -452,9 +455,18 @@ def update_user_endpoint(
 ):
     if body.is_active is False and user_id == admin["id"]:
         raise HTTPException(status_code=400, detail="Cannot deactivate yourself")
+    if body.is_platform_admin is False and user_id == admin["id"]:
+        raise HTTPException(status_code=400, detail="Cannot demote yourself from platform admin")
+    if body.is_platform_admin is not None and not admin.get("is_platform_admin"):
+        raise HTTPException(status_code=403, detail="Only platform admins can change platform_admin flag")
     if not db.get_user(conn, user_id):
         raise HTTPException(status_code=404, detail="User not found")
-    db.update_user(conn, user_id, is_active=body.is_active, is_admin=body.is_admin)
+    db.update_user(
+        conn, user_id,
+        is_active=body.is_active,
+        is_admin=body.is_admin,
+        is_platform_admin=body.is_platform_admin,
+    )
     if body.is_active is False:
         log.info("User deactivated: user_id=%s by admin=%s", user_id, admin["id"])
     if body.is_admin is not None:
@@ -462,6 +474,13 @@ def update_user_endpoint(
             "User admin flag changed: user_id=%s is_admin=%s by admin=%s",
             user_id,
             body.is_admin,
+            admin["id"],
+        )
+    if body.is_platform_admin is not None:
+        log.info(
+            "User platform_admin flag changed: user_id=%s is_platform_admin=%s by admin=%s",
+            user_id,
+            body.is_platform_admin,
             admin["id"],
         )
     return SuccessResponse()
@@ -858,6 +877,45 @@ def create_company_signup_invite(
         admin["id"],
     )
     return CompanySignupInviteResponse(token=token, link=link)
+
+
+@app.get("/admin/companies")
+def list_companies_admin(
+    _admin: dict[str, Any] = Depends(require_platform_admin),
+    conn: sqlite3.Connection = Depends(db.get_db),
+):
+    rows = conn.execute(
+        """
+        SELECT
+            c.id,
+            c.display_name,
+            c.legal_name,
+            c.primary_timezone AS timezone,
+            c.created_at,
+            COUNT(DISTINCT cu.user_id) AS member_count,
+            COUNT(DISTINCT p.id)       AS project_count
+        FROM companies c
+        LEFT JOIN company_users cu ON cu.company_id = c.id AND cu.is_active = 1
+        LEFT JOIN projects p       ON p.company_id  = c.id
+        WHERE c.is_active = 1
+        GROUP BY c.id
+        ORDER BY c.display_name
+        """
+    ).fetchall()
+    return CompanyAdminListResponse(
+        companies=[
+            CompanyAdminView(
+                id=r["id"],
+                display_name=r["display_name"],
+                legal_name=r["legal_name"],
+                timezone=r["timezone"] or "America/Chicago",
+                created_at=r["created_at"],
+                member_count=r["member_count"],
+                project_count=r["project_count"],
+            )
+            for r in rows
+        ]
+    )
 
 
 @app.post("/admin/companies", status_code=201)

@@ -66,6 +66,7 @@ class UserInfo(BaseModel):
     display_name: str
     is_active: bool
     is_admin: bool
+    is_platform_admin: bool = False
     created_at: str
     last_seen_at: str
     apps: list[str]
@@ -78,6 +79,7 @@ class UserListResponse(BaseModel):
 class PatchUserRequest(BaseModel):
     is_active: bool | None = None
     is_admin: bool | None = None
+    is_platform_admin: bool | None = None
 
 
 class CreateUserRequest(BaseModel):
@@ -130,6 +132,20 @@ class CompanyUserInfo(BaseModel):
 
 class CompanyListResponse(BaseModel):
     companies: list[CompanyInfo]
+
+
+class CompanyAdminView(BaseModel):
+    id: str
+    display_name: str
+    legal_name: str
+    timezone: str
+    created_at: str
+    member_count: int
+    project_count: int
+
+
+class CompanyAdminListResponse(BaseModel):
+    companies: list[CompanyAdminView]
 
 
 class CompanyCreateRequest(BaseModel):

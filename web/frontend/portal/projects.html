@@ -19,7 +19,18 @@
                 <div class="flex items-center gap-4">
                     <a href="/" class="text-blue-600 hover:underline text-sm">← Back</a>
                     <h1 class="text-lg font-semibold text-gray-800">Projects</h1>
-                    <a href="/portal/dashboard.html" class="text-sm text-blue-600 hover:underline">Dashboard</a>
+                    <a :href="user.is_platform_admin && companyId ? `/portal/dashboard.html?company=${companyId}` : '/portal/dashboard.html'"
+                        class="text-sm text-blue-600 hover:underline">Dashboard</a>
+                    <!-- Platform admin company picker -->
+                    <template x-if="user.is_platform_admin && allCompanies.length > 0">
+                        <select @change="switchCompany($event.target.value)"
+                            class="text-sm border rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-400">
+                            <option value="" disabled :selected="!companyId">Select company…</option>
+                            <template x-for="c in allCompanies" :key="c.id">
+                                <option :value="c.id" :selected="c.id === companyId" x-text="c.display_name"></option>
+                            </template>
+                        </select>
+                    </template>
                 </div>
                 <div class="flex items-center gap-4 text-sm text-gray-600">
                     <span x-text="user.display_name"></span>
@@ -41,7 +52,7 @@
 
             <div class="flex justify-between items-center mb-6">
                 <h2 class="text-xl font-semibold text-gray-800">Your Projects</h2>
-                <a href="/portal/project-new.html"
+                <a :href="user.is_platform_admin && companyId ? `/portal/project-new.html?company=${companyId}` : '/portal/project-new.html'"
                     class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition">
                     + New Project
                 </a>
@@ -57,9 +68,9 @@
                 <p class="text-sm text-gray-500 mb-6">Create your first project to get started with automated weekly
                     reports.</p>
                 <a href="/portal/project-new.html"
-                    class="inline-block bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg text-sm font-medium transition">
-                    Create Your First Project
-                </a>
+                        class="inline-block bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg text-sm font-medium transition">
+                        Create Your First Project
+                    </a>
             </div>
 
             <!-- Projects Table -->
@@ -129,7 +140,7 @@
                                     <span x-text="calculateNextDue(project)"></span>
                                 </td>
                                 <td class="px-6 py-4 whitespace-nowrap text-right text-sm">
-                                    <a :href="'/portal/project-detail.html?id=' + project.id"
+                                    <a :href="'/portal/project-detail.html?id=' + project.id + (companyId && user.is_platform_admin ? '&company=' + companyId : '')"
                                         class="text-blue-600 hover:text-blue-700 font-medium">
                                         View →
                                     </a>
@@ -149,12 +160,13 @@
             return {
                 loading: true,
                 error: '',
-                user: { display_name: '', company_id: '' },
+                user: { display_name: '', company_id: '', is_platform_admin: false },
+                companyId: '',
+                allCompanies: [],
                 projects: [],
 
                 async init() {
                     try {
-                        // Get current user
                         const meRes = await fetch('/auth/me', { credentials: 'same-origin' });
                         if (!meRes.ok) {
                             window.location.href = '/auth/login';
@@ -162,17 +174,39 @@
                         }
                         this.user = await meRes.json();
 
-                        // Get company_id from user's first company membership
-                        // TODO: handle multi-company users with company picker
-                        const companyId = this.user.company_id || this.extractCompanyFromMemberships();
-                        if (!companyId) {
-                            this.error = 'No company membership found. Please contact your administrator.';
+                        // URL param takes precedence; localStorage is convenience default only
+                        const urlParams = new URLSearchParams(window.location.search);
+                        const urlCompany = urlParams.get('company');
+                        if (urlCompany) {
+                            this.companyId = urlCompany;
+                            localStorage.setItem('lastCompanyId', urlCompany);
+                        } else {
+                            this.companyId = this.user.company_id
+                                || this.extractCompanyFromMemberships()
+                                || localStorage.getItem('lastCompanyId');
+                        }
+
+                        // Platform admin: load company list for picker
+                        if (this.user.is_platform_admin) {
+                            const caRes = await fetch('/admin/companies', { credentials: 'same-origin' });
+                            if (caRes.ok) {
+                                const caData = await caRes.json();
+                                this.allCompanies = caData.companies;
+                            }
+                            if (this.companyId && !urlCompany) {
+                                history.replaceState(null, '', `?company=${this.companyId}`);
+                            }
+                        }
+
+                        if (!this.companyId) {
+                            this.error = this.user.is_platform_admin
+                                ? 'Select a company above to view its projects.'
+                                : 'No company membership found. Please contact your administrator.';
                             this.loading = false;
                             return;
                         }
 
-                        // Fetch projects
-                        const projectsRes = await fetch(`/auth/companies/${companyId}/projects`, {
+                        const projectsRes = await fetch(`/auth/companies/${this.companyId}/projects`, {
                             credentials: 'same-origin'
                         });
 
@@ -190,9 +224,15 @@
                     }
                 },
 
+                switchCompany(id) {
+                    if (!id) return;
+                    localStorage.setItem('lastCompanyId', id);
+                    window.location.href = `?company=${id}`;
+                },
+
                 extractCompanyFromMemberships() {
-                    // If user has companies array, pick first one
-                    // In a real multi-company scenario, would show company picker
+                    const urlCompany = new URLSearchParams(window.location.search).get('company');
+                    if (urlCompany) return urlCompany;
                     if (this.user.companies && this.user.companies.length > 0) {
                         return this.user.companies[0].id;
                     }

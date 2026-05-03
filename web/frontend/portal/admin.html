@@ -165,6 +165,44 @@
                         x-text="directCompany.errorMsg"></div>
                 </section>
 
+                <!-- ── Section B0c: Companies (platform admin only) ── -->
+                <section x-show="user.is_platform_admin && allCompanies.length > 0"
+                    class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                    <h2 class="text-lg font-semibold text-gray-800 mb-4">Companies</h2>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr class="text-left text-gray-400 border-b text-xs uppercase tracking-wider">
+                                    <th class="py-2 pr-4">Display Name</th>
+                                    <th class="py-2 pr-4">Legal Name</th>
+                                    <th class="py-2 pr-4">Members</th>
+                                    <th class="py-2 pr-4">Projects</th>
+                                    <th class="py-2 pr-4">Created</th>
+                                    <th class="py-2"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="c in allCompanies" :key="c.id">
+                                    <tr class="border-b last:border-0">
+                                        <td class="py-2 pr-4 font-medium" x-text="c.display_name"></td>
+                                        <td class="py-2 pr-4 text-gray-500" x-text="c.legal_name"></td>
+                                        <td class="py-2 pr-4" x-text="c.member_count"></td>
+                                        <td class="py-2 pr-4" x-text="c.project_count"></td>
+                                        <td class="py-2 pr-4 text-gray-500"
+                                            x-text="new Date(c.created_at).toLocaleDateString()"></td>
+                                        <td class="py-2 space-x-3">
+                                            <a :href="`/portal/projects.html?company=${c.id}`"
+                                                class="text-xs text-blue-600 hover:underline">Projects →</a>
+                                            <a :href="`/portal/dashboard.html?company=${c.id}`"
+                                                class="text-xs text-gray-600 hover:underline">Dashboard →</a>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
                 <div class="flex flex-col sm:flex-row gap-4 items-end">
                     <div class="w-full sm:flex-1">
                         <label class="block text-sm text-gray-600 mb-1">Name</label>
@@ -274,6 +312,8 @@
                                 <td>
                                     <span x-show="u.is_admin"
                                         class="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">Admin</span>
+                                    <span x-show="u.is_platform_admin"
+                                        class="px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">⭐ Platform Admin</span>
                                 </td>
                                 <td x-text="u.apps.join(', ')"></td>
                                 <td class="text-gray-500" x-text="timeAgo(u.last_seen_at)"></td>
@@ -287,6 +327,14 @@
                                         class="text-xs text-gray-600 hover:underline">Sessions</button>
                                     <button @click="resetPassword(u)"
                                         class="text-xs text-purple-600 hover:underline">Reset PW</button>
+                                    <template x-if="user.is_platform_admin">
+                                        <button @click="togglePlatformAdmin(u)"
+                                            :disabled="u.id === user.user_id"
+                                            :class="u.is_platform_admin ? 'text-yellow-700 hover:underline' : 'text-yellow-600 hover:underline'"
+                                            :title="u.id === user.user_id ? 'Cannot change your own platform admin status' : ''"
+                                            class="text-xs disabled:opacity-40 disabled:cursor-not-allowed"
+                                            x-text="u.is_platform_admin ? '✕ Remove PA' : '⭐ Make PA'"></button>
+                                    </template>
                                 </td>
                             </tr>
                         </template>
@@ -352,6 +400,7 @@
                 companySignupLink: '',
                 allCompanySignupInvites: [],
                 directCompany: { legal_name: '', display_name: '', submitting: false, successMsg: '', errorMsg: '' },
+                allCompanies: [],
                 invite: { name: '', apps: [] },
                 generatedCode: '',
                 generatedLink: '',
@@ -394,6 +443,8 @@
                     if (this.user.is_platform_admin) {
                         const csi = await this.api('/admin/company-signup-invites').catch(() => ({ invites: [] }));
                         this.allCompanySignupInvites = csi.invites;
+                        const ca = await this.api('/admin/companies').catch(() => ({ companies: [] }));
+                        this.allCompanies = ca.companies;
                     }
                 },
 
@@ -477,6 +528,13 @@
                     const action = u.is_active ? 'Deactivate' : 'Activate';
                     if (!confirm(`${action} ${u.display_name}?`)) return;
                     await this.api(`/admin/users/${u.id}`, 'PATCH', { is_active: !u.is_active });
+                    await this.refresh();
+                },
+
+                async togglePlatformAdmin(u) {
+                    const action = u.is_platform_admin ? 'Remove platform admin from' : 'Make platform admin';
+                    if (!confirm(`${action} ${u.display_name}?`)) return;
+                    await this.api(`/admin/users/${u.id}`, 'PATCH', { is_platform_admin: !u.is_platform_admin });
                     await this.refresh();
                 },
 

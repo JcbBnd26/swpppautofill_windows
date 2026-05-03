@@ -17,7 +17,7 @@
         <header class="bg-white shadow-sm">
             <div class="max-w-3xl mx-auto px-6 py-4 flex items-center justify-between">
                 <div class="flex items-center gap-4">
-                    <a href="/portal/projects.html" class="text-blue-600 hover:underline text-sm">← Back to Projects</a>
+                    <a :href="companyId ? '/portal/projects.html?company=' + companyId : '/portal/projects.html'" class="text-blue-600 hover:underline text-sm">← Back to Projects</a>
                     <h1 class="text-lg font-semibold text-gray-800">New Project</h1>
                 </div>
                 <div class="flex items-center gap-4 text-sm text-gray-600">
@@ -169,7 +169,7 @@
 
                     <!-- Submit -->
                     <div class="flex items-center justify-end gap-3 pt-6 border-t border-gray-200">
-                        <a href="/portal/projects.html"
+                        <a :href="companyId ? '/portal/projects.html?company=' + companyId : '/portal/projects.html'"
                             class="px-6 py-2.5 text-sm font-medium text-gray-700 hover:text-gray-900">
                             Cancel
                         </a>
@@ -198,6 +198,7 @@
                 error: '',
                 duplicateError: '',
                 user: { display_name: '', company_id: '' },
+                companyId: '',
                 form: {
                     project_number: '',
                     project_name: '',
@@ -221,6 +222,7 @@
                             return;
                         }
                         this.user = await meRes.json();
+                        this.companyId = this.user.company_id || this.extractCompanyFromMemberships();
                     } catch (err) {
                         console.error('Error loading user:', err);
                         this.error = 'Failed to load user data';
@@ -311,6 +313,8 @@
                 },
 
                 extractCompanyFromMemberships() {
+                    const urlCompany = new URLSearchParams(window.location.search).get('company');
+                    if (urlCompany) return urlCompany;
                     if (this.user.companies && this.user.companies.length > 0) {
                         return this.user.companies[0].id;
                     }

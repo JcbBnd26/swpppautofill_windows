@@ -17,8 +17,19 @@
         <header class="bg-white shadow-sm">
             <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
                 <div class="flex items-center gap-4">
-                    <a href="/portal/projects.html" class="text-blue-600 hover:underline text-sm">← Projects</a>
+                    <a :href="user.is_platform_admin && companyId ? `/portal/projects.html?company=${companyId}` : '/portal/projects.html'"
+                        class="text-blue-600 hover:underline text-sm">← Projects</a>
                     <h1 class="text-lg font-semibold text-gray-800">Company Dashboard</h1>
+                    <!-- Platform admin company picker -->
+                    <template x-if="user.is_platform_admin && allCompanies.length > 0">
+                        <select @change="switchCompany($event.target.value)"
+                            class="text-sm border rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-400">
+                            <option value="" disabled :selected="!companyId">Select company…</option>
+                            <template x-for="c in allCompanies" :key="c.id">
+                                <option :value="c.id" :selected="c.id === companyId" x-text="c.display_name"></option>
+                            </template>
+                        </select>
+                    </template>
                 </div>
                 <div class="flex items-center gap-4 text-sm text-gray-600">
                     <span x-text="user.display_name"></span>
@@ -141,8 +152,9 @@
             return {
                 loading: true,
                 error: '',
-                user: { display_name: '', company_id: '' },
+                user: { display_name: '', company_id: '', is_platform_admin: false },
                 companyId: '',
+                allCompanies: [],
                 dashboard: {},
                 runLoading: false,
                 runResult: null,
@@ -157,9 +169,35 @@
                         }
                         this.user = await meRes.json();
 
-                        this.companyId = this.user.company_id || this.extractCompanyFromMemberships();
+                        // URL param takes precedence; localStorage is convenience default only
+                        const urlParams = new URLSearchParams(window.location.search);
+                        const urlCompany = urlParams.get('company');
+                        if (urlCompany) {
+                            this.companyId = urlCompany;
+                            localStorage.setItem('lastCompanyId', urlCompany);
+                        } else {
+                            this.companyId = this.user.company_id
+                                || this.extractCompanyFromMemberships()
+                                || localStorage.getItem('lastCompanyId');
+                        }
+
+                        // Platform admin: load company list for picker
+                        if (this.user.is_platform_admin) {
+                            const caRes = await fetch('/admin/companies', { credentials: 'same-origin' });
+                            if (caRes.ok) {
+                                const caData = await caRes.json();
+                                this.allCompanies = caData.companies;
+                            }
+                            // Ensure URL reflects active company
+                            if (this.companyId && !urlCompany) {
+                                history.replaceState(null, '', `?company=${this.companyId}`);
+                            }
+                        }
+
                         if (!this.companyId) {
-                            this.error = 'No company membership found. Please contact your administrator.';
+                            this.error = this.user.is_platform_admin
+                                ? 'Select a company above to view its dashboard.'
+                                : 'No company membership found. Please contact your administrator.';
                             this.loading = false;
                             return;
                         }
@@ -171,6 +209,12 @@
                     } finally {
                         this.loading = false;
                     }
+                },
+
+                switchCompany(id) {
+                    if (!id) return;
+                    localStorage.setItem('lastCompanyId', id);
+                    window.location.href = `?company=${id}`;
                 },
 
                 async loadDashboard() {
@@ -208,6 +252,8 @@
                 },
 
                 extractCompanyFromMemberships() {
+                    const urlCompany = new URLSearchParams(window.location.search).get('company');
+                    if (urlCompany) return urlCompany;
                     if (this.user.companies && this.user.companies.length > 0) {
                         return this.user.companies[0].id;
                     }

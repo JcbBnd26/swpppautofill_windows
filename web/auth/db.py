@@ -490,7 +490,7 @@ def get_all_users(conn: sqlite3.Connection) -> list[dict[str, Any]]:
 
 
 def update_user(conn: sqlite3.Connection, user_id: str, **fields: Any) -> None:
-    allowed = {"is_active", "is_admin"}
+    allowed = {"is_active", "is_admin", "is_platform_admin"}
     updates = {k: v for k, v in fields.items() if k in allowed and v is not None}
     if not updates:
         return
