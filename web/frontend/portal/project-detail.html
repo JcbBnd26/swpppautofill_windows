@@ -17,7 +17,8 @@
         <header class="bg-white shadow-sm">
             <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
                 <div class="flex items-center gap-4">
-                    <a :href="companyId ? '/portal/projects.html?company=' + companyId : '/portal/projects.html'" class="text-blue-600 hover:underline text-sm">← Back to Projects</a>
+                    <a :href="companyId ? '/portal/projects.html?company=' + companyId : '/portal/projects.html'"
+                        class="text-blue-600 hover:underline text-sm">← Back to Projects</a>
                     <h1 class="text-lg font-semibold text-gray-800" x-text="project.project_number || 'Project'"></h1>
                 </div>
                 <div class="flex items-center gap-4 text-sm text-gray-600">

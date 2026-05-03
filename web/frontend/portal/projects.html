@@ -68,87 +68,94 @@
                 <p class="text-sm text-gray-500 mb-6">Create your first project to get started with automated weekly
                     reports.</p>
                 <a href="/portal/project-new.html"
-                        class="inline-block bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg text-sm font-medium transition">
-                        Create Your First Project
-                    </a>
+                    class="inline-block bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg text-sm font-medium transition">
+                    Create Your First Project
+                </a>
             </div>
 
             <!-- Projects Table -->
             <div x-show="projects.length > 0" class="bg-white rounded-xl border border-gray-200 overflow-hidden">
                 <div class="overflow-x-auto">
-                <table class="w-full">
-                    <thead class="bg-gray-50 border-b border-gray-200">
-                        <tr>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Project Number
-                            </th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Project Name
-                            </th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Status
-                            </th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" title="Auto-reporting health">
-                                Health
-                            </th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Last Report
-                            </th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Next Due
-                            </th>
-                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Actions
-                            </th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-gray-200">
-                        <template x-for="project in projects" :key="project.id">
-                            <tr class="hover:bg-gray-50 transition">
-                                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                    <span x-text="project.project_number"></span>
-                                </td>
-                                <td class="px-6 py-4 text-sm text-gray-700">
-                                    <span x-text="project.project_name"></span>
-                                </td>
-                                <td class="px-6 py-4 whitespace-nowrap">
-                                    <span
-                                        class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium"
-                                        :class="{
+                    <table class="w-full">
+                        <thead class="bg-gray-50 border-b border-gray-200">
+                            <tr>
+                                <th
+                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Project Number
+                                </th>
+                                <th
+                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Project Name
+                                </th>
+                                <th
+                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Status
+                                </th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                                    title="Auto-reporting health">
+                                    Health
+                                </th>
+                                <th
+                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Last Report
+                                </th>
+                                <th
+                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Next Due
+                                </th>
+                                <th
+                                    class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Actions
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-200">
+                            <template x-for="project in projects" :key="project.id">
+                                <tr class="hover:bg-gray-50 transition">
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                        <span x-text="project.project_number"></span>
+                                    </td>
+                                    <td class="px-6 py-4 text-sm text-gray-700">
+                                        <span x-text="project.project_name"></span>
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap">
+                                        <span
+                                            class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium"
+                                            :class="{
                                               'bg-green-100 text-green-700': project.status === 'active',
                                               'bg-yellow-100 text-yellow-700': project.status === 'setup_incomplete' || project.status === 'paused',
                                               'bg-gray-100 text-gray-700': project.status !== 'active' && project.status !== 'setup_incomplete' && project.status !== 'paused'
                                           }">
-                                        <span class="w-1.5 h-1.5 rounded-full" :class="{
+                                            <span class="w-1.5 h-1.5 rounded-full" :class="{
                                                   'bg-green-500': project.status === 'active',
                                                   'bg-yellow-500': project.status === 'setup_incomplete' || project.status === 'paused',
                                                   'bg-gray-500': project.status !== 'active' && project.status !== 'setup_incomplete' && project.status !== 'paused'
                                               }"></span>
-                                        <span x-text="formatStatus(project.status)"></span>
-                                    </span>
-                                </td>
-                                <td class="px-6 py-4 whitespace-nowrap">
-                                    <span :title="healthDotTitle(project)">
-                                        <span class="inline-block w-3 h-3 rounded-full"
-                                            :class="healthDotClass(project)"></span>
-                                    </span>
-                                </td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                    <span x-text="formatDate(project.last_successful_run_at)"></span>
-                                </td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                    <span x-text="calculateNextDue(project)"></span>
-                                </td>
-                                <td class="px-6 py-4 whitespace-nowrap text-right text-sm">
-                                    <a :href="'/portal/project-detail.html?id=' + project.id + (companyId && user.is_platform_admin ? '&company=' + companyId : '')"
-                                        class="text-blue-600 hover:text-blue-700 font-medium">
-                                        View →
-                                    </a>
-                                </td>
-                            </tr>
-                        </template>
-                    </tbody>
-                </table>
+                                            <span x-text="formatStatus(project.status)"></span>
+                                        </span>
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap">
+                                        <span :title="healthDotTitle(project)">
+                                            <span class="inline-block w-3 h-3 rounded-full"
+                                                :class="healthDotClass(project)"></span>
+                                        </span>
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                        <span x-text="formatDate(project.last_successful_run_at)"></span>
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                        <span x-text="calculateNextDue(project)"></span>
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-right text-sm">
+                                        <a :href="'/portal/project-detail.html?id=' + project.id + (companyId && user.is_platform_admin ? '&company=' + companyId : '')"
+                                            class="text-blue-600 hover:text-blue-700 font-medium">
+                                            View →
+                                        </a>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
                 </div>
             </div>
 

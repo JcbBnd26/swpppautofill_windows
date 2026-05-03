@@ -75,13 +75,14 @@
                 <div class="flex items-center justify-between flex-wrap gap-4">
                     <div>
                         <h2 class="text-base font-semibold text-gray-800">Run Reports Now</h2>
-                        <p class="text-sm text-gray-500 mt-0.5">Trigger the auto-report scheduler for all projects in your company that are due.</p>
+                        <p class="text-sm text-gray-500 mt-0.5">Trigger the auto-report scheduler for all projects in
+                            your company that are due.</p>
                     </div>
-                    <button @click="runReports()"
-                        :disabled="runLoading"
+                    <button @click="runReports()" :disabled="runLoading"
                         class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg text-sm font-medium transition disabled:opacity-50 flex items-center gap-2">
                         <svg x-show="runLoading" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
+                            </circle>
                             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
                         </svg>
                         <span x-show="!runLoading">Run Reports</span>
@@ -94,9 +95,12 @@
                     <p class="font-medium mb-2">Run complete</p>
                     <div class="flex gap-6 text-sm">
                         <span>Projects processed: <strong x-text="runResult?.projects_processed"></strong></span>
-                        <span>Reports filed: <strong class="text-green-700" x-text="runResult?.reports_filed"></strong></span>
-                        <span x-show="runResult?.failures > 0">Failures: <strong class="text-red-600" x-text="runResult?.failures"></strong></span>
-                        <span x-show="runResult?.skipped > 0">Skipped: <strong x-text="runResult?.skipped"></strong></span>
+                        <span>Reports filed: <strong class="text-green-700"
+                                x-text="runResult?.reports_filed"></strong></span>
+                        <span x-show="runResult?.failures > 0">Failures: <strong class="text-red-600"
+                                x-text="runResult?.failures"></strong></span>
+                        <span x-show="runResult?.skipped > 0">Skipped: <strong
+                                x-text="runResult?.skipped"></strong></span>
                     </div>
                 </div>
 
@@ -109,37 +113,47 @@
                     <h2 class="text-base font-semibold text-gray-800">Recent Failures</h2>
                 </div>
 
-                <div x-show="(dashboard.recent_failures ?? []).length === 0" class="px-6 py-8 text-sm text-gray-500 text-center">
+                <div x-show="(dashboard.recent_failures ?? []).length === 0"
+                    class="px-6 py-8 text-sm text-gray-500 text-center">
                     No recent failures — all auto-reporting projects are healthy.
                 </div>
 
                 <div x-show="(dashboard.recent_failures ?? []).length > 0">
                     <div class="overflow-x-auto">
-                    <table class="w-full text-sm">
-                        <thead class="bg-gray-50 border-b border-gray-200">
-                            <tr>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Project #</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Project Name</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Error</th>
-                                <th class="px-6 py-3"></th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-gray-200">
-                            <template x-for="f in (dashboard.recent_failures ?? [])" :key="f.project_id + f.run_date">
-                                <tr class="hover:bg-gray-50 transition">
-                                    <td class="px-6 py-4 font-medium text-gray-900" x-text="f.project_number"></td>
-                                    <td class="px-6 py-4 text-gray-700" x-text="f.project_name"></td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-gray-500" x-text="f.run_date"></td>
-                                    <td class="px-6 py-4 text-red-600 text-xs" x-text="f.error_message || '—'"></td>
-                                    <td class="px-6 py-4 text-right">
-                                        <a :href="'/portal/project-detail.html?id=' + f.project_id"
-                                            class="text-blue-600 hover:underline text-xs">View →</a>
-                                    </td>
+                        <table class="w-full text-sm">
+                            <thead class="bg-gray-50 border-b border-gray-200">
+                                <tr>
+                                    <th
+                                        class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Project #</th>
+                                    <th
+                                        class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Project Name</th>
+                                    <th
+                                        class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Date</th>
+                                    <th
+                                        class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Error</th>
+                                    <th class="px-6 py-3"></th>
                                 </tr>
-                            </template>
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody class="divide-y divide-gray-200">
+                                <template x-for="f in (dashboard.recent_failures ?? [])"
+                                    :key="f.project_id + f.run_date">
+                                    <tr class="hover:bg-gray-50 transition">
+                                        <td class="px-6 py-4 font-medium text-gray-900" x-text="f.project_number"></td>
+                                        <td class="px-6 py-4 text-gray-700" x-text="f.project_name"></td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-gray-500" x-text="f.run_date"></td>
+                                        <td class="px-6 py-4 text-red-600 text-xs" x-text="f.error_message || '—'"></td>
+                                        <td class="px-6 py-4 text-right">
+                                            <a :href="'/portal/project-detail.html?id=' + f.project_id"
+                                                class="text-blue-600 hover:underline text-xs">View →</a>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>

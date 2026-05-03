@@ -109,26 +109,26 @@
                     <div x-show="pendingCompanyInvites.length > 0" class="mt-6">
                         <p class="text-sm font-medium text-gray-700 mb-2">Pending Company Signups</p>
                         <div class="overflow-x-auto">
-                        <table class="w-full text-xs">
-                            <thead>
-                                <tr class="text-left text-gray-400 border-b">
-                                    <th class="py-1">Company</th>
-                                    <th>Email</th>
-                                    <th>Created</th>
-                                    <th>Expires</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <template x-for="inv in pendingCompanyInvites" :key="inv.token">
-                                    <tr class="border-b last:border-0">
-                                        <td class="py-1" x-text="inv.proposed_company_name"></td>
-                                        <td x-text="inv.admin_email"></td>
-                                        <td x-text="timeAgo(inv.created_at)"></td>
-                                        <td x-text="new Date(inv.expires_at).toLocaleDateString()"></td>
+                            <table class="w-full text-xs">
+                                <thead>
+                                    <tr class="text-left text-gray-400 border-b">
+                                        <th class="py-1">Company</th>
+                                        <th>Email</th>
+                                        <th>Created</th>
+                                        <th>Expires</th>
                                     </tr>
-                                </template>
-                            </tbody>
-                        </table>
+                                </thead>
+                                <tbody>
+                                    <template x-for="inv in pendingCompanyInvites" :key="inv.token">
+                                        <tr class="border-b last:border-0">
+                                            <td class="py-1" x-text="inv.proposed_company_name"></td>
+                                            <td x-text="inv.admin_email"></td>
+                                            <td x-text="timeAgo(inv.created_at)"></td>
+                                            <td x-text="new Date(inv.expires_at).toLocaleDateString()"></td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 </section>
@@ -148,8 +148,7 @@
                         </div>
                         <div class="w-full sm:flex-1">
                             <label class="block text-sm text-gray-600 mb-1">Display Name</label>
-                            <input type="text" x-model="directCompany.display_name"
-                                placeholder="e.g. Apex Contractors"
+                            <input type="text" x-model="directCompany.display_name" placeholder="e.g. Apex Contractors"
                                 class="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400" />
                         </div>
                         <button @click="createCompanyDirect()"
@@ -257,31 +256,31 @@
                 <h2 class="text-lg font-semibold text-gray-800 mb-4">Pending Invites</h2>
                 <div x-show="pendingInvites.length === 0" class="text-gray-400 text-sm">None</div>
                 <div class="overflow-x-auto">
-                <table x-show="pendingInvites.length > 0" class="w-full text-sm">
-                    <thead>
-                        <tr class="text-left text-gray-500 border-b">
-                            <th class="py-2">Code</th>
-                            <th>Name</th>
-                            <th>Apps</th>
-                            <th>Created</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <template x-for="inv in pendingInvites" :key="inv.id">
-                            <tr class="border-b last:border-0">
-                                <td class="py-2 font-mono text-xs" x-text="inv.id"></td>
-                                <td x-text="inv.display_name"></td>
-                                <td x-text="inv.app_permissions.join(', ')"></td>
-                                <td x-text="timeAgo(inv.created_at)"></td>
-                                <td>
-                                    <button @click="revokeInvite(inv.id)"
-                                        class="text-red-600 hover:underline text-xs">Cancel</button>
-                                </td>
+                    <table x-show="pendingInvites.length > 0" class="w-full text-sm">
+                        <thead>
+                            <tr class="text-left text-gray-500 border-b">
+                                <th class="py-2">Code</th>
+                                <th>Name</th>
+                                <th>Apps</th>
+                                <th>Created</th>
+                                <th></th>
                             </tr>
-                        </template>
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            <template x-for="inv in pendingInvites" :key="inv.id">
+                                <tr class="border-b last:border-0">
+                                    <td class="py-2 font-mono text-xs" x-text="inv.id"></td>
+                                    <td x-text="inv.display_name"></td>
+                                    <td x-text="inv.app_permissions.join(', ')"></td>
+                                    <td x-text="timeAgo(inv.created_at)"></td>
+                                    <td>
+                                        <button @click="revokeInvite(inv.id)"
+                                            class="text-red-600 hover:underline text-xs">Cancel</button>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
                 </div>
             </section>
 
@@ -289,57 +288,57 @@
             <section class="bg-white rounded-xl shadow-sm border p-6">
                 <h2 class="text-lg font-semibold text-gray-800 mb-4">Users</h2>
                 <div class="overflow-x-auto">
-                <table class="w-full text-sm">
-                    <thead>
-                        <tr class="text-left text-gray-500 border-b">
-                            <th class="py-2">Name</th>
-                            <th>Status</th>
-                            <th>Admin</th>
-                            <th>Apps</th>
-                            <th>Last Seen</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <template x-for="u in users" :key="u.id">
-                            <tr class="border-b last:border-0">
-                                <td class="py-2 font-medium" x-text="u.display_name"></td>
-                                <td>
-                                    <span class="px-2 py-0.5 rounded-full text-xs font-medium"
-                                        :class="u.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'"
-                                        x-text="u.is_active ? 'Active' : 'Inactive'"></span>
-                                </td>
-                                <td>
-                                    <span x-show="u.is_admin"
-                                        class="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">Admin</span>
-                                    <span x-show="u.is_platform_admin"
-                                        class="px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">⭐ Platform Admin</span>
-                                </td>
-                                <td x-text="u.apps.join(', ')"></td>
-                                <td class="text-gray-500" x-text="timeAgo(u.last_seen_at)"></td>
-                                <td class="space-x-2">
-                                    <button @click="toggleUserActive(u)" class="text-xs hover:underline"
-                                        :class="u.is_active ? 'text-red-600' : 'text-green-600'"
-                                        x-text="u.is_active ? 'Deactivate' : 'Activate'"></button>
-                                    <button @click="manageApps(u)"
-                                        class="text-xs text-blue-600 hover:underline">Apps</button>
-                                    <button @click="viewSessions(u)"
-                                        class="text-xs text-gray-600 hover:underline">Sessions</button>
-                                    <button @click="resetPassword(u)"
-                                        class="text-xs text-purple-600 hover:underline">Reset PW</button>
-                                    <template x-if="user.is_platform_admin">
-                                        <button @click="togglePlatformAdmin(u)"
-                                            :disabled="u.id === user.user_id"
-                                            :class="u.is_platform_admin ? 'text-yellow-700 hover:underline' : 'text-yellow-600 hover:underline'"
-                                            :title="u.id === user.user_id ? 'Cannot change your own platform admin status' : ''"
-                                            class="text-xs disabled:opacity-40 disabled:cursor-not-allowed"
-                                            x-text="u.is_platform_admin ? '✕ Remove PA' : '⭐ Make PA'"></button>
-                                    </template>
-                                </td>
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="text-left text-gray-500 border-b">
+                                <th class="py-2">Name</th>
+                                <th>Status</th>
+                                <th>Admin</th>
+                                <th>Apps</th>
+                                <th>Last Seen</th>
+                                <th></th>
                             </tr>
-                        </template>
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            <template x-for="u in users" :key="u.id">
+                                <tr class="border-b last:border-0">
+                                    <td class="py-2 font-medium" x-text="u.display_name"></td>
+                                    <td>
+                                        <span class="px-2 py-0.5 rounded-full text-xs font-medium"
+                                            :class="u.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'"
+                                            x-text="u.is_active ? 'Active' : 'Inactive'"></span>
+                                    </td>
+                                    <td>
+                                        <span x-show="u.is_admin"
+                                            class="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">Admin</span>
+                                        <span x-show="u.is_platform_admin"
+                                            class="px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">⭐
+                                            Platform Admin</span>
+                                    </td>
+                                    <td x-text="u.apps.join(', ')"></td>
+                                    <td class="text-gray-500" x-text="timeAgo(u.last_seen_at)"></td>
+                                    <td class="space-x-2">
+                                        <button @click="toggleUserActive(u)" class="text-xs hover:underline"
+                                            :class="u.is_active ? 'text-red-600' : 'text-green-600'"
+                                            x-text="u.is_active ? 'Deactivate' : 'Activate'"></button>
+                                        <button @click="manageApps(u)"
+                                            class="text-xs text-blue-600 hover:underline">Apps</button>
+                                        <button @click="viewSessions(u)"
+                                            class="text-xs text-gray-600 hover:underline">Sessions</button>
+                                        <button @click="resetPassword(u)"
+                                            class="text-xs text-purple-600 hover:underline">Reset PW</button>
+                                        <template x-if="user.is_platform_admin">
+                                            <button @click="togglePlatformAdmin(u)" :disabled="u.id === user.user_id"
+                                                :class="u.is_platform_admin ? 'text-yellow-700 hover:underline' : 'text-yellow-600 hover:underline'"
+                                                :title="u.id === user.user_id ? 'Cannot change your own platform admin status' : ''"
+                                                class="text-xs disabled:opacity-40 disabled:cursor-not-allowed"
+                                                x-text="u.is_platform_admin ? '✕ Remove PA' : '⭐ Make PA'"></button>
+                                        </template>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
                 </div>
             </section>
 

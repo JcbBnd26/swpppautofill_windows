@@ -456,13 +456,19 @@ def update_user_endpoint(
     if body.is_active is False and user_id == admin["id"]:
         raise HTTPException(status_code=400, detail="Cannot deactivate yourself")
     if body.is_platform_admin is False and user_id == admin["id"]:
-        raise HTTPException(status_code=400, detail="Cannot demote yourself from platform admin")
+        raise HTTPException(
+            status_code=400, detail="Cannot demote yourself from platform admin"
+        )
     if body.is_platform_admin is not None and not admin.get("is_platform_admin"):
-        raise HTTPException(status_code=403, detail="Only platform admins can change platform_admin flag")
+        raise HTTPException(
+            status_code=403,
+            detail="Only platform admins can change platform_admin flag",
+        )
     if not db.get_user(conn, user_id):
         raise HTTPException(status_code=404, detail="User not found")
     db.update_user(
-        conn, user_id,
+        conn,
+        user_id,
         is_active=body.is_active,
         is_admin=body.is_admin,
         is_platform_admin=body.is_platform_admin,
@@ -884,8 +890,7 @@ def list_companies_admin(
     _admin: dict[str, Any] = Depends(require_platform_admin),
     conn: sqlite3.Connection = Depends(db.get_db),
 ):
-    rows = conn.execute(
-        """
+    rows = conn.execute("""
         SELECT
             c.id,
             c.display_name,
@@ -900,8 +905,7 @@ def list_companies_admin(
         WHERE c.is_active = 1
         GROUP BY c.id
         ORDER BY c.display_name
-        """
-    ).fetchall()
+        """).fetchall()
     return CompanyAdminListResponse(
         companies=[
             CompanyAdminView(
@@ -941,7 +945,9 @@ def create_company_direct(
     db.add_company_user(conn, admin["id"], company_id, role="company_admin")
     log.info(
         "Company created directly by platform admin: id=%s name=%s admin=%s",
-        company_id, legal_name, admin["id"],
+        company_id,
+        legal_name,
+        admin["id"],
     )
     return {"id": company_id, "display_name": display_name}
 
