@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Generator
+from zoneinfo import ZoneInfo
 
 log = logging.getLogger(__name__)
 
@@ -1657,6 +1658,153 @@ def get_company_dashboard(conn: sqlite3.Connection, company_id: str) -> dict:
         }
         for f in failures
     ]
+
+    # IR-9: Reports filed this week (uses company's primary_timezone)
+    company = get_company(conn, company_id)
+    if company and company.get("primary_timezone"):
+        try:
+            tz = ZoneInfo(company["primary_timezone"])
+            now_in_tz = datetime.now(tz)
+            # Find Monday 00:00 of this week
+            days_since_monday = now_in_tz.weekday()
+            monday_midnight = (now_in_tz - timedelta(days=days_since_monday)).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+            week_boundary_utc = monday_midnight.astimezone(timezone.utc).isoformat()
+        except Exception:
+            # Fallback if timezone data not available: use UTC
+            now_utc = datetime.now(timezone.utc)
+            days_since_monday = now_utc.weekday()
+            monday_midnight = (now_utc - timedelta(days=days_since_monday)).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+            week_boundary_utc = monday_midnight.isoformat()
+
+        reports_this_week = conn.execute(
+            """
+            SELECT COUNT(*) as count
+              FROM mailbox_entries
+             WHERE company_id = ?
+               AND created_at >= ?
+            """,
+            (company_id, week_boundary_utc),
+        ).fetchone()
+        counts["reports_filed_this_week"] = (
+            reports_this_week["count"] if reports_this_week else 0
+        )
+    else:
+        counts["reports_filed_this_week"] = 0
+
+    # IR-9: Recent activity (last 10 mailbox entries across all company projects)
+    recent_activity_rows = conn.execute(
+        """
+        SELECT me.id AS entry_id, me.project_id, me.report_date, me.report_type, me.created_at,
+               p.project_number, p.project_name
+          FROM mailbox_entries me
+          JOIN projects p ON p.id = me.project_id
+         WHERE me.company_id = ?
+         ORDER BY me.created_at DESC
+         LIMIT 10
+        """,
+        (company_id,),
+    ).fetchall()
+
+    counts["recent_activity"] = [
+        {
+            "entry_id": r["entry_id"],
+            "project_id": r["project_id"],
+            "project_number": r["project_number"],
+            "project_name": r["project_name"],
+            "report_date": r["report_date"],
+            "report_type": r["report_type"],
+            "created_at": r["created_at"],
+        }
+        for r in recent_activity_rows
+    ]
+
+    # IR-9: Upcoming this week (projects with reports due in next 7 days)
+    today = _now()[:10]  # YYYY-MM-DD
+    upcoming_projects = conn.execute(
+        """
+        SELECT id, project_number, project_name, schedule_day_of_week
+          FROM projects
+         WHERE company_id = ?
+           AND auto_weekly_enabled = 1
+           AND status = 'active'
+           AND (paused_until IS NULL OR paused_until < ?)
+        """,
+        (company_id, today),
+    ).fetchall()
+
+    # Compute next_due_date in Python based on schedule_day_of_week
+    upcoming_list = []
+    today_dt = datetime.fromisoformat(today)
+    for p in upcoming_projects:
+        dow = p["schedule_day_of_week"]  # 0=Monday, 6=Sunday
+        days_ahead = (dow - today_dt.weekday()) % 7
+        if days_ahead == 0:
+            days_ahead = 7  # If today is the scheduled day, next due is next week
+        next_due = today_dt + timedelta(days=days_ahead)
+
+        # Only include if within next 7 days
+        if days_ahead <= 7:
+            upcoming_list.append(
+                {
+                    "project_id": p["id"],
+                    "project_number": p["project_number"],
+                    "project_name": p["project_name"],
+                    "next_due_date": next_due.strftime("%Y-%m-%d"),
+                }
+            )
+
+    counts["upcoming_this_week"] = upcoming_list
+
+    # IR-9: Templates due for review
+    templates_due_rows = conn.execute(
+        """
+        SELECT id, project_number, project_name, template_last_reviewed_at, template_review_cadence
+          FROM projects
+         WHERE company_id = ?
+           AND template_review_cadence IN ('monthly', 'quarterly')
+        """,
+        (company_id,),
+    ).fetchall()
+
+    templates_due_list = []
+    now_dt = datetime.now(timezone.utc)
+    for t in templates_due_rows:
+        cadence = t["template_review_cadence"]
+        last_reviewed = t["template_last_reviewed_at"]
+
+        # Determine threshold
+        if cadence == "monthly":
+            threshold_days = 30
+        elif cadence == "quarterly":
+            threshold_days = 90
+        else:
+            continue
+
+        is_overdue = False
+        if last_reviewed is None:
+            is_overdue = True
+        else:
+            last_reviewed_dt = datetime.fromisoformat(last_reviewed)
+            days_since = (now_dt - last_reviewed_dt).days
+            if days_since > threshold_days:
+                is_overdue = True
+
+        if is_overdue:
+            templates_due_list.append(
+                {
+                    "project_id": t["id"],
+                    "project_number": t["project_number"],
+                    "project_name": t["project_name"],
+                    "template_last_reviewed_at": t["template_last_reviewed_at"],
+                    "cadence": cadence,
+                }
+            )
+
+    counts["templates_due_for_review"] = templates_due_list
 
     return counts
 

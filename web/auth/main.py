@@ -86,6 +86,9 @@ from web.auth.models import (
     UserListResponse,
     CompanyDashboardResponse,
     ProjectFailureSummary,
+    RecentActivityEntry,
+    UpcomingProjectEntry,
+    TemplateReviewDueEntry,
     RunLogEntry,
     RunLogResponse,
     PlatformDashboardResponse,
@@ -1411,6 +1414,14 @@ def get_company_dashboard(
         paused=data["paused"],
         setup_incomplete=data["setup_incomplete"],
         recent_failures=[ProjectFailureSummary(**f) for f in data["recent_failures"]],
+        reports_filed_this_week=data["reports_filed_this_week"],
+        recent_activity=[RecentActivityEntry(**r) for r in data["recent_activity"]],
+        upcoming_this_week=[
+            UpcomingProjectEntry(**u) for u in data["upcoming_this_week"]
+        ],
+        templates_due_for_review=[
+            TemplateReviewDueEntry(**t) for t in data["templates_due_for_review"]
+        ],
     )
 
 

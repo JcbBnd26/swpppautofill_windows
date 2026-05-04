@@ -522,6 +522,37 @@ class ProjectFailureSummary(BaseModel):
     error_message: str | None = None
 
 
+class RecentActivityEntry(BaseModel):
+    """Mailbox entry for dashboard recent activity (IR-9)."""
+
+    entry_id: str
+    project_id: str
+    project_number: str
+    project_name: str
+    report_date: str
+    report_type: str
+    created_at: str
+
+
+class UpcomingProjectEntry(BaseModel):
+    """Project with upcoming report due (IR-9)."""
+
+    project_id: str
+    project_number: str
+    project_name: str
+    next_due_date: str
+
+
+class TemplateReviewDueEntry(BaseModel):
+    """Project with template due for review (IR-9)."""
+
+    project_id: str
+    project_number: str
+    project_name: str
+    template_last_reviewed_at: str | None
+    cadence: str
+
+
 class CompanyDashboardResponse(BaseModel):
     total_projects: int
     active: int
@@ -529,6 +560,11 @@ class CompanyDashboardResponse(BaseModel):
     paused: int
     setup_incomplete: int
     recent_failures: list[ProjectFailureSummary]
+    # IR-9: Projects overview fields
+    reports_filed_this_week: int
+    recent_activity: list[RecentActivityEntry]
+    upcoming_this_week: list[UpcomingProjectEntry]
+    templates_due_for_review: list[TemplateReviewDueEntry]
 
 
 class RunLogEntry(BaseModel):

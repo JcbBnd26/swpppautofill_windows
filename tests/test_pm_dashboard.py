@@ -175,7 +175,14 @@ class TestGetCompanyDashboard:
                 cookies={"tools_session": token},
             )
             body = res.json()
-            for key in ("total_projects", "active", "failing", "paused", "setup_incomplete", "recent_failures"):
+            for key in (
+                "total_projects",
+                "active",
+                "failing",
+                "paused",
+                "setup_incomplete",
+                "recent_failures",
+            ):
                 assert key in body, f"Missing key: {key}"
             assert isinstance(body["recent_failures"], list)
         finally:
@@ -304,6 +311,368 @@ class TestGetCompanyDashboard:
             conn.close()
 
 
+# ── TestCompanyDashboardOverview (IR-9) ───────────────────────────────────
+
+
+class TestCompanyDashboardOverview:
+    """Tests for IR-9: Dashboard as Projects Overview - new fields."""
+
+    def test_response_includes_new_fields(self):
+        """Confirm all four new IR-9 fields are present in the response."""
+        conn = _make_conn()
+        data = _seed(conn)
+        token = _create_company_member_session(conn, data["company_id"])
+        client = TestClient(app)
+
+        def override():
+            yield conn
+
+        app.dependency_overrides[db.get_db] = override
+        try:
+            res = client.get(
+                f"/companies/{data['company_id']}/dashboard",
+                cookies={"tools_session": token},
+            )
+            body = res.json()
+            assert "reports_filed_this_week" in body
+            assert "recent_activity" in body
+            assert "upcoming_this_week" in body
+            assert "templates_due_for_review" in body
+            assert isinstance(body["reports_filed_this_week"], int)
+            assert isinstance(body["recent_activity"], list)
+            assert isinstance(body["upcoming_this_week"], list)
+            assert isinstance(body["templates_due_for_review"], list)
+        finally:
+            app.dependency_overrides.clear()
+            conn.close()
+
+    def test_reports_filed_this_week_counts_correctly(self):
+        """Reports filed this week are counted based on created_at >= Monday 00:00 in company timezone."""
+        conn = _make_conn()
+        data = _seed(conn)
+
+        # Seed mailbox entries: one from this week, one from last week
+        from datetime import datetime, timezone, timedelta
+
+        # This week entry (use current date/time)
+        this_week = datetime.now(timezone.utc).isoformat()
+        db.create_mailbox_entry(
+            conn,
+            project_id=data["project_id"],
+            company_id=data["company_id"],
+            report_date="2026-05-03",
+            report_type="auto_weekly",
+            file_path="report_this_week.pdf",
+        )
+        # Set created_at to this week
+        conn.execute(
+            "UPDATE mailbox_entries SET created_at=? WHERE report_date='2026-05-03'",
+            (this_week,),
+        )
+
+        # Last week entry
+        last_week = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+        db.create_mailbox_entry(
+            conn,
+            project_id=data["project_id"],
+            company_id=data["company_id"],
+            report_date="2026-04-20",
+            report_type="auto_weekly",
+            file_path="report_last_week.pdf",
+        )
+        conn.execute(
+            "UPDATE mailbox_entries SET created_at=? WHERE report_date='2026-04-20'",
+            (last_week,),
+        )
+        conn.commit()
+
+        token = _create_company_member_session(conn, data["company_id"])
+        client = TestClient(app)
+
+        def override():
+            yield conn
+
+        app.dependency_overrides[db.get_db] = override
+        try:
+            res = client.get(
+                f"/companies/{data['company_id']}/dashboard",
+                cookies={"tools_session": token},
+            )
+            body = res.json()
+            # Should only count the one from this week
+            assert body["reports_filed_this_week"] >= 1
+        finally:
+            app.dependency_overrides.clear()
+            conn.close()
+
+    def test_recent_activity_returns_max_10(self):
+        """Recent activity is capped at 10 entries even if more exist."""
+        conn = _make_conn()
+        data = _seed(conn)
+
+        # Seed 15 mailbox entries
+        for i in range(15):
+            db.create_mailbox_entry(
+                conn,
+                project_id=data["project_id"],
+                company_id=data["company_id"],
+                report_date=f"2026-05-{str(i+1).zfill(2)}",
+                report_type="auto_weekly",
+                file_path=f"report_{i}.pdf",
+            )
+
+        token = _create_company_member_session(conn, data["company_id"])
+        client = TestClient(app)
+
+        def override():
+            yield conn
+
+        app.dependency_overrides[db.get_db] = override
+        try:
+            res = client.get(
+                f"/companies/{data['company_id']}/dashboard",
+                cookies={"tools_session": token},
+            )
+            body = res.json()
+            assert len(body["recent_activity"]) == 10
+        finally:
+            app.dependency_overrides.clear()
+            conn.close()
+
+    def test_recent_activity_ordered_newest_first(self):
+        """Recent activity is ordered by created_at DESC."""
+        conn = _make_conn()
+        data = _seed(conn)
+
+        # Seed 3 mailbox entries with different timestamps
+        db.create_mailbox_entry(
+            conn,
+            project_id=data["project_id"],
+            company_id=data["company_id"],
+            report_date="2026-05-01",
+            report_type="auto_weekly",
+            file_path="report1.pdf",
+        )
+        db.create_mailbox_entry(
+            conn,
+            project_id=data["project_id"],
+            company_id=data["company_id"],
+            report_date="2026-05-03",
+            report_type="auto_weekly",
+            file_path="report3.pdf",
+        )
+        db.create_mailbox_entry(
+            conn,
+            project_id=data["project_id"],
+            company_id=data["company_id"],
+            report_date="2026-05-02",
+            report_type="auto_weekly",
+            file_path="report2.pdf",
+        )
+
+        token = _create_company_member_session(conn, data["company_id"])
+        client = TestClient(app)
+
+        def override():
+            yield conn
+
+        app.dependency_overrides[db.get_db] = override
+        try:
+            res = client.get(
+                f"/companies/{data['company_id']}/dashboard",
+                cookies={"tools_session": token},
+            )
+            body = res.json()
+            activities = body["recent_activity"]
+            assert len(activities) == 3
+            # Verify DESC order by created_at (most recent first)
+            for i in range(len(activities) - 1):
+                assert activities[i]["created_at"] >= activities[i + 1]["created_at"]
+        finally:
+            app.dependency_overrides.clear()
+            conn.close()
+
+    def test_upcoming_this_week_includes_due_projects(self):
+        """Projects with schedule_day_of_week within next 7 days appear in upcoming_this_week."""
+        conn = _make_conn()
+        data = _seed(conn)
+
+        # Get today's weekday (0=Monday, 6=Sunday)
+        from datetime import datetime
+
+        today = datetime.now()
+        today_weekday = today.weekday()
+
+        # Set project to be due in 2 days
+        due_in_2_days = (today_weekday + 2) % 7
+        conn.execute(
+            "UPDATE projects SET schedule_day_of_week=? WHERE id=?",
+            (due_in_2_days, data["project_id"]),
+        )
+
+        # Create another project due in 10 days (should not appear)
+        suffix = str(uuid.uuid4())[:8]
+        future_project_id = db.create_project(
+            conn,
+            company_id=data["company_id"],
+            project_number=f"FUT{suffix}",
+            project_name="Future Project",
+            site_address="10 Main St",
+            timezone="America/Chicago",
+            rain_station_code="NRMN",
+            created_by_user_id=data["admin_id"],
+        )
+        due_in_10_days = (today_weekday - 3) % 7  # This will be more than 7 days away
+        conn.execute(
+            "UPDATE projects SET auto_weekly_enabled=1, status='active', schedule_day_of_week=? WHERE id=?",
+            (due_in_10_days, future_project_id),
+        )
+        conn.commit()
+
+        token = _create_company_member_session(conn, data["company_id"])
+        client = TestClient(app)
+
+        def override():
+            yield conn
+
+        app.dependency_overrides[db.get_db] = override
+        try:
+            res = client.get(
+                f"/companies/{data['company_id']}/dashboard",
+                cookies={"tools_session": token},
+            )
+            body = res.json()
+            upcoming = body["upcoming_this_week"]
+            # The project due in 2 days should appear
+            project_ids = [u["project_id"] for u in upcoming]
+            assert data["project_id"] in project_ids
+        finally:
+            app.dependency_overrides.clear()
+            conn.close()
+
+    def test_upcoming_excludes_paused_projects(self):
+        """Projects with paused_until in the future are excluded from upcoming_this_week."""
+        conn = _make_conn()
+        data = _seed(conn)
+
+        # Set paused_until to a future date
+        conn.execute(
+            "UPDATE projects SET paused_until='2026-12-31' WHERE id=?",
+            (data["project_id"],),
+        )
+        conn.commit()
+
+        token = _create_company_member_session(conn, data["company_id"])
+        client = TestClient(app)
+
+        def override():
+            yield conn
+
+        app.dependency_overrides[db.get_db] = override
+        try:
+            res = client.get(
+                f"/companies/{data['company_id']}/dashboard",
+                cookies={"tools_session": token},
+            )
+            body = res.json()
+            upcoming = body["upcoming_this_week"]
+            # The paused project should NOT appear
+            project_ids = [u["project_id"] for u in upcoming]
+            assert data["project_id"] not in project_ids
+        finally:
+            app.dependency_overrides.clear()
+            conn.close()
+
+    def test_templates_due_for_review_respects_cadence(self):
+        """Templates due for review respects monthly (30 days) and quarterly (90 days) thresholds."""
+        conn = _make_conn()
+        data = _seed(conn)
+
+        # Set the project to quarterly review, last reviewed 95 days ago (overdue)
+        from datetime import datetime, timedelta, timezone
+
+        old_review = (datetime.now(timezone.utc) - timedelta(days=95)).isoformat()
+        conn.execute(
+            "UPDATE projects SET template_review_cadence='quarterly', template_last_reviewed_at=? WHERE id=?",
+            (old_review, data["project_id"]),
+        )
+
+        # Create another project with quarterly review, last reviewed 30 days ago (NOT overdue)
+        suffix = str(uuid.uuid4())[:8]
+        recent_project_id = db.create_project(
+            conn,
+            company_id=data["company_id"],
+            project_number=f"REC{suffix}",
+            project_name="Recent Review Project",
+            site_address="5 Main St",
+            timezone="America/Chicago",
+            rain_station_code="NRMN",
+            created_by_user_id=data["admin_id"],
+        )
+        recent_review = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        conn.execute(
+            "UPDATE projects SET template_review_cadence='quarterly', template_last_reviewed_at=?, status='active' WHERE id=?",
+            (recent_review, recent_project_id),
+        )
+        conn.commit()
+
+        token = _create_company_member_session(conn, data["company_id"])
+        client = TestClient(app)
+
+        def override():
+            yield conn
+
+        app.dependency_overrides[db.get_db] = override
+        try:
+            res = client.get(
+                f"/companies/{data['company_id']}/dashboard",
+                cookies={"tools_session": token},
+            )
+            body = res.json()
+            templates_due = body["templates_due_for_review"]
+            project_ids = [t["project_id"] for t in templates_due]
+            # The 95-day-old project should appear
+            assert data["project_id"] in project_ids
+            # The 30-day-old project should NOT appear
+            assert recent_project_id not in project_ids
+        finally:
+            app.dependency_overrides.clear()
+            conn.close()
+
+    def test_templates_never_cadence_excluded(self):
+        """Projects with template_review_cadence='never' never appear in templates_due_for_review."""
+        conn = _make_conn()
+        data = _seed(conn)
+
+        # Set project to 'never' review cadence
+        conn.execute(
+            "UPDATE projects SET template_review_cadence='never', template_last_reviewed_at=NULL WHERE id=?",
+            (data["project_id"],),
+        )
+        conn.commit()
+
+        token = _create_company_member_session(conn, data["company_id"])
+        client = TestClient(app)
+
+        def override():
+            yield conn
+
+        app.dependency_overrides[db.get_db] = override
+        try:
+            res = client.get(
+                f"/companies/{data['company_id']}/dashboard",
+                cookies={"tools_session": token},
+            )
+            body = res.json()
+            templates_due = body["templates_due_for_review"]
+            project_ids = [t["project_id"] for t in templates_due]
+            # The project with 'never' cadence should NOT appear
+            assert data["project_id"] not in project_ids
+        finally:
+            app.dependency_overrides.clear()
+            conn.close()
+
+
 # ── TestGetProjectRunLog ──────────────────────────────────────────────────
 
 
@@ -415,9 +784,15 @@ class TestGetProjectRunLog:
     def test_entries_returned_newest_first(self):
         conn = _make_conn()
         data = _seed(conn)
-        db.create_project_run_log(conn, project_id=data["project_id"], run_date="2026-04-01", status="ok")
-        db.create_project_run_log(conn, project_id=data["project_id"], run_date="2026-04-08", status="ok")
-        db.create_project_run_log(conn, project_id=data["project_id"], run_date="2026-04-15", status="failed")
+        db.create_project_run_log(
+            conn, project_id=data["project_id"], run_date="2026-04-01", status="ok"
+        )
+        db.create_project_run_log(
+            conn, project_id=data["project_id"], run_date="2026-04-08", status="ok"
+        )
+        db.create_project_run_log(
+            conn, project_id=data["project_id"], run_date="2026-04-15", status="failed"
+        )
         token = _create_company_member_session(conn, data["company_id"])
         client = TestClient(app)
 
@@ -554,7 +929,9 @@ class TestRunCompanyReports:
     def test_company_admin_can_trigger(self):
         conn = _make_conn()
         data = _seed(conn)
-        token = _create_company_member_session(conn, data["company_id"], role="company_admin")
+        token = _create_company_member_session(
+            conn, data["company_id"], role="company_admin"
+        )
         client = TestClient(app)
 
         def override():
